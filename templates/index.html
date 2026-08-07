@@ -176,7 +176,6 @@
     margin-bottom: 12px;
     line-height: 1.5;
   }
-  #destination-hint b { color: var(--paper); }
 
   .preset-grid {
     display: grid;
@@ -337,9 +336,134 @@
 
   .leaflet-tile-pane { filter: saturate(0.85) brightness(0.95); }
 
+  /* Floating Search Bar */
+  #search-bar-wrap {
+    position: absolute;
+    top: calc(16px + env(safe-area-inset-top));
+    left: calc(20px + env(safe-area-inset-left));
+    z-index: 750;
+    width: calc(100% - 40px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-width: 420px;
+  }
+
+  .search-input-box {
+    display: flex;
+    align-items: center;
+    background: rgba(27, 29, 36, 0.94);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    padding: 0 12px;
+    height: 48px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .search-input-box:focus-within {
+    border-color: var(--apricot);
+    box-shadow: 0 8px 28px rgba(245, 165, 84, 0.25);
+  }
+
+  .search-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--fog);
+    flex-shrink: 0;
+    margin-right: 10px;
+  }
+
+  #search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    height: 100%;
+  }
+
+  #search-input::placeholder {
+    color: var(--fog);
+  }
+
+  .search-clear-btn {
+    background: transparent;
+    border: none;
+    color: var(--fog);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 6px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 32px;
+    touch-action: manipulation;
+  }
+  .search-clear-btn.hidden {
+    display: none;
+  }
+
+  .search-dropdown {
+    background: rgba(27, 29, 36, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    margin-top: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    -webkit-overflow-scrolling: touch;
+  }
+  .search-dropdown.hidden {
+    display: none;
+  }
+
+  .search-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--basalt-line);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: background 0.15s;
+    min-height: 48px;
+    justify-content: center;
+    touch-action: manipulation;
+  }
+  .search-item:last-child {
+    border-bottom: none;
+  }
+  .search-item:hover, .search-item:active {
+    background: var(--basalt-800);
+  }
+
+  .search-item-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--paper);
+  }
+
+  .search-item-sub {
+    font-size: 11.5px;
+    color: var(--fog);
+  }
+
+  .search-no-results {
+    padding: 14px;
+    font-size: 13px;
+    color: var(--fog);
+    text-align: center;
+  }
+
   #legend {
     position: absolute;
-    bottom: 24px; left: 20px;
+    bottom: calc(24px + env(safe-area-inset-bottom));
+    left: calc(20px + env(safe-area-inset-left));
     z-index: 500;
     background: rgba(27,29,36,.92);
     backdrop-filter: blur(8px);
@@ -365,7 +489,8 @@
 
   #hint-banner {
     position: absolute;
-    top: 20px; left: 50%; transform: translateX(-50%);
+    top: calc(76px + env(safe-area-inset-top));
+    left: 50%; transform: translateX(-50%);
     z-index: 500;
     background: rgba(27,29,36,.92);
     backdrop-filter: blur(8px);
@@ -411,8 +536,9 @@
   /* Admin UI controls */
   #admin-toggle-wrap {
     position: absolute;
-    top: 20px; right: 20px;
-    z-index: 600;
+    top: calc(16px + env(safe-area-inset-top));
+    right: calc(20px + env(safe-area-inset-right));
+    z-index: 750;
     display: flex;
     gap: 8px;
   }
@@ -445,7 +571,8 @@
 
   #admin-modal {
     position: absolute;
-    top: 70px; right: 20px;
+    top: calc(75px + env(safe-area-inset-top));
+    right: calc(20px + env(safe-area-inset-right));
     z-index: 1000;
     background: rgba(27,29,36,.96);
     backdrop-filter: blur(12px);
@@ -550,6 +677,7 @@
       box-shadow: 0 -8px 32px rgba(0,0,0,0.6);
       z-index: 1000;
       transform: translateY(0);
+      padding-bottom: env(safe-area-inset-bottom);
     }
 
     #sidebar.sheet-collapsed {
@@ -569,9 +697,17 @@
 
     .section { padding: 14px 18px; }
 
+    #search-bar-wrap {
+      top: calc(10px + env(safe-area-inset-top));
+      left: calc(12px + env(safe-area-inset-left));
+      width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+      max-width: none;
+    }
+
     #admin-toggle-wrap {
-      top: 12px; right: 12px;
-      flex-direction: column;
+      top: calc(66px + env(safe-area-inset-top));
+      right: calc(12px + env(safe-area-inset-right));
+      flex-direction: row;
     }
     .admin-btn {
       padding: 8px 14px;
@@ -580,13 +716,14 @@
     }
 
     #hint-banner {
-      top: 12px;
-      font-size: 11.5px;
-      padding: 7px 14px;
+      top: calc(116px + env(safe-area-inset-top));
+      font-size: 11px;
+      padding: 6px 12px;
     }
 
     #legend {
-      bottom: 74px; left: 12px;
+      bottom: calc(74px + env(safe-area-inset-bottom));
+      left: calc(12px + env(safe-area-inset-left));
       width: 180px;
       padding: 10px 12px;
       font-size: 11px;
@@ -605,14 +742,6 @@
       margin-bottom: 70px !important;
     }
   }
-
-    /* Replace '.log-ml-button' with your button's exact class or id */
-    .log-ml-button {
-      position: absolute;
-      top: calc(15px + env(safe-area-inset-top));
-      left: calc(15px + env(safe-area-inset-left));
-    }
-
 </style>
 </head>
 <body>
@@ -643,12 +772,12 @@
 
       <div class="section">
         <div class="section-title">Destination</div>
-        <div id="destination-hint">Click anywhere on the map to drop a pin, or jump to a landmark below.</div>
+        <div id="destination-hint">Search an address above, click anywhere on the map, or jump to a landmark below.</div>
         <div class="preset-grid" id="presets"></div>
         <div id="destination-active">
           <div>Destination set at</div>
           <div class="coord" id="dest-coords">—</div>
-          <button id="clear-destination">Clear destination</button>
+          <button id="clear-destination" onclick="clearDestination()">Clear destination</button>
         </div>
       </div>
 
@@ -674,12 +803,25 @@
   </aside>
 
   <div id="map-wrap">
+    <!-- Floating Address Search Bar -->
+    <div id="search-bar-wrap">
+      <div class="search-input-box">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="search-input" placeholder="Search address, e.g. Mashtots 23/6..." autocomplete="off" spellcheck="false" />
+        <button id="search-clear-btn" class="search-clear-btn hidden" onclick="clearSearchInput()">&times;</button>
+      </div>
+      <div id="search-dropdown" class="search-dropdown hidden"></div>
+    </div>
+
     <div id="map"></div>
-    <div id="hint-banner"><span class="dot"></span><span id="hint-text">Click the map to set a destination</span></div>
+    <div id="hint-banner"><span class="dot"></span><span id="hint-text">Search address or click map to set destination</span></div>
     
     <div id="admin-toggle-wrap">
-      <button id="ml-log-toggle" class="admin-btn">Log ML Parking</button>
-      <button id="admin-toggle" class="admin-btn">Admin / Curation Mode</button>
+      <button id="ml-log-toggle" class="admin-btn" onclick="logMLFeedback()">Log ML Parking</button>
+      <button id="admin-toggle" class="admin-btn" onclick="toggleAdminMode()">Admin / Curation Mode</button>
     </div>
 
     <!-- Admin Form Modal Overlay -->
@@ -728,408 +870,435 @@ const CENTER = [{{ center_lat }}, {{ center_lon }}];
 const TYPE_LABEL = { free: 'Free', paid: 'Paid', lot: 'Lot', unavailable: 'Unavailable', unspecified: 'Unspecified' };
 
 const PRESETS = [
-  { label: 'Republic Square', lat: 40.1772, lon: 44.5152 },
-  { label: 'Opera House', lat: 40.1848, lon: 44.5158 },
-  { label: 'Cascade Complex', lat: 40.1913, lon: 44.5133 },
-  { label: 'Vernissage Market', lat: 40.1808, lon: 44.5175 },
+  { name: 'Northern Ave', lat: 40.1798, lon: 44.5133 },
+  { name: 'Opera Theatre', lat: 40.1848, lon: 44.5158 },
+  { name: 'Republic Square', lat: 40.1778, lon: 44.5128 },
+  { name: 'Cascade', lat: 40.1910, lon: 44.5135 },
+  { name: 'Matenadaran', lat: 40.1920, lon: 44.5210 },
+  { name: 'Saryan Wine St', lat: 40.1840, lon: 44.5075 }
 ];
 
-// ---------------- Mobile Bottom Sheet Toggle ----------------
+let map, parkingLayer, destMarker;
+let recMarkers = [];
+let currentDest = null;
+let isAdminMode = false;
+let searchDebounceTimer = null;
+
+// Helper function to escape HTML string attributes safely
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initClock();
+  initMap();
+  renderPresets();
+  fetchWeather();
+  fetchTraffic();
+  initSearchInput();
+  setInterval(fetchTraffic, 15000);
+  setInterval(fetchWeather, 60000);
+});
+
+function initClock() {
+  const clockEl = document.getElementById('clock');
+  function tick() {
+    const d = new Date();
+    clockEl.innerText = d.toLocaleTimeString('en-US', { hour12: false });
+  }
+  tick();
+  setInterval(tick, 1000);
+}
+
+function initMap() {
+  map = L.map('map', { zoomControl: false }).setView(CENTER, 15);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    subdomains: 'abcd',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  }).addTo(map);
+
+  loadParkingData();
+
+  map.on('click', (e) => {
+    if (isAdminMode) return;
+    setDestination(e.latlng.lat, e.latlng.lng, `Custom Pin (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`);
+  });
+}
+
+// --------------------------------------------------------------------------
+// Address Search Bar & Autocomplete Logic
+// --------------------------------------------------------------------------
+
+function initSearchInput() {
+  const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  const searchDropdown = document.getElementById('search-dropdown');
+
+  searchInput.addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    if (val.length > 0) {
+      searchClearBtn.classList.remove('hidden');
+    } else {
+      searchClearBtn.classList.add('hidden');
+      searchDropdown.classList.add('hidden');
+      return;
+    }
+
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      fetchSearchResults(val);
+    }, 220);
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const firstItem = searchDropdown.querySelector('.search-item');
+      if (firstItem) {
+        firstItem.click();
+      }
+    } else if (e.key === 'Escape') {
+      searchDropdown.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('search-bar-wrap').contains(e.target)) {
+      searchDropdown.classList.add('hidden');
+    }
+  });
+}
+
+function clearSearchInput() {
+  const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchInput.value = '';
+  searchClearBtn.classList.add('hidden');
+  searchDropdown.classList.add('hidden');
+  searchInput.focus();
+}
+
+async function fetchSearchResults(query) {
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const results = await resp.json();
+    renderSearchDropdown(results);
+  } catch (err) {
+    console.error('Search error:', err);
+  }
+}
+
+function renderSearchDropdown(results) {
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchDropdown.innerHTML = '';
+
+  if (!results || results.length === 0) {
+    searchDropdown.innerHTML = '<div class="search-no-results">No matching locations found</div>';
+    searchDropdown.classList.remove('hidden');
+    return;
+  }
+
+  results.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'search-item';
+    div.innerHTML = `
+      <div class="search-item-title">${escapeHtml(item.title)}</div>
+      <div class="search-item-sub">${escapeHtml(item.subtitle)}</div>
+    `;
+    div.onclick = () => {
+      selectSearchLocation(item);
+    };
+    searchDropdown.appendChild(div);
+  });
+
+  searchDropdown.classList.remove('hidden');
+}
+
+function selectSearchLocation(item) {
+  const searchInput = document.getElementById('search-input');
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchInput.value = item.title;
+  searchDropdown.classList.add('hidden');
+
+  map.setView([item.lat, item.lon], 16);
+  setDestination(item.lat, item.lon, item.title);
+}
+
+// --------------------------------------------------------------------------
+// Core Parking & Recommender Engine Interactions
+// --------------------------------------------------------------------------
+
+function loadParkingData() {
+  if (parkingLayer) map.removeLayer(parkingLayer);
+
+  fetch('/api/parking')
+    .then(r => r.json())
+    .then(geojson => {
+      parkingLayer = L.geoJSON(geojson, {
+        style: (feature) => ({
+          color: feature.properties.color || '#7f8c8d',
+          weight: feature.geometry.type === 'Polygon' ? 2 : 5,
+          opacity: 0.85,
+          fillColor: feature.properties.color || '#7f8c8d',
+          fillOpacity: 0.35
+        }),
+        onEachFeature: (feature, layer) => {
+          const props = feature.properties;
+          layer.bindPopup(`
+            <div style="font-family:'Inter',sans-serif; color:#14151a;">
+              <strong style="font-size:14px; font-weight:700;">${escapeHtml(props.name)}</strong><br/>
+              <span style="font-size:12px; color:#555;">Type: <b>${TYPE_LABEL[props.parking_type] || props.parking_type}</b></span><br/>
+              <span style="font-size:12px; color:#555;">Availability: <b>${props.availability_pct}%</b></span><br/>
+              <span style="font-size:12px; color:#555;">Traffic Level: <b>${props.traffic_level}</b></span>
+            </div>
+          `);
+
+          if (isAdminMode) {
+            layer.on('click', (e) => {
+              L.DomEvent.stopPropagation(e);
+              openAdminModal(feature);
+            });
+          }
+        }
+      }).addTo(map);
+    });
+}
+
+function renderPresets() {
+  const grid = document.getElementById('presets');
+  grid.innerHTML = '';
+  PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.innerText = p.name;
+    btn.onclick = () => {
+      map.setView([p.lat, p.lon], 16);
+      setDestination(p.lat, p.lon, p.name);
+    };
+    grid.appendChild(btn);
+  });
+}
+
+function setDestination(lat, lon, label) {
+  currentDest = { lat, lon, label };
+
+  if (destMarker) map.removeLayer(destMarker);
+
+  const destIcon = L.divIcon({
+    className: 'dest-marker-wrap',
+    html: '<div class="dest-marker"></div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  });
+
+  destMarker = L.marker([lat, lon], { icon: destIcon }).addTo(map);
+
+  document.getElementById('destination-active').style.display = 'block';
+  document.getElementById('dest-coords').innerText = `${label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+
+  fetchRecommendations(lat, lon);
+}
+
+function clearDestination() {
+  currentDest = null;
+  if (destMarker) map.removeLayer(destMarker);
+  recMarkers.forEach(m => map.removeLayer(m));
+  recMarkers = [];
+
+  document.getElementById('destination-active').style.display = 'none';
+  document.getElementById('rec-list').innerHTML = `
+    <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
+  `;
+}
+
+function fetchRecommendations(lat, lon) {
+  fetch(`/api/recommend?lat=${lat}&lon=${lon}`)
+    .then(r => r.json())
+    .then(data => {
+      renderRecommendations(data.recommendations);
+    });
+}
+
+function renderRecommendations(recs) {
+  recMarkers.forEach(m => map.removeLayer(m));
+  recMarkers = [];
+
+  const container = document.getElementById('rec-list');
+  container.innerHTML = '';
+
+  if (!recs || recs.length === 0) {
+    container.innerHTML = '<div id="rec-empty">No parking options available near this destination.</div>';
+    return;
+  }
+
+  recs.forEach((r, idx) => {
+    const rank = idx + 1;
+    const markerIcon = L.divIcon({
+      className: 'rec-marker-wrap',
+      html: `<div class="rec-marker"><span>${rank}</span></div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 26]
+    });
+
+    const m = L.marker([r.location.lat, r.location.lon], { icon: markerIcon }).addTo(map);
+    m.bindPopup(`
+      <div style="font-family:'Inter',sans-serif; color:#14151a;">
+        <strong>#${rank} ${escapeHtml(r.name)}</strong><br/>
+        Score: <b>${r.final_score}</b> / 100<br/>
+        Distance: ${r.distance_m}m (${r.walk_time_min} min walk)
+      </div>
+    `);
+    recMarkers.push(m);
+
+    const card = document.createElement('div');
+    card.className = 'rec-card';
+    card.onclick = () => {
+      map.setView([r.location.lat, r.location.lon], 17);
+      m.openPopup();
+    };
+
+    const pillClass = `pill-${r.parking_type}`;
+
+    card.innerHTML = `
+      <div class="rec-rank">${rank}</div>
+      <div class="rec-body">
+        <div class="rec-name">${escapeHtml(r.name)}</div>
+        <div class="rec-meta">
+          <span class="pill ${pillClass}">${TYPE_LABEL[r.parking_type] || r.parking_type}</span>
+          <span>${r.distance_m}m</span>
+          <span>&bull;</span>
+          <span>~${r.walk_time_min}m walk</span>
+        </div>
+      </div>
+      <div class="gauge" style="background: conic-gradient(var(--apricot) ${r.final_score}%, var(--basalt-700) 0)">
+        <div class="gauge-inner">${r.final_score}</div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function fetchWeather() {
+  fetch('/api/weather')
+    .then(r => r.json())
+    .then(w => {
+      document.getElementById('weather-display').innerText = w.summary || `${w.temp_c}°C, ${w.condition}`;
+    });
+}
+
+function fetchTraffic() {
+  fetch('/api/traffic')
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('overall-level').innerText = data.overall_level;
+      const container = document.getElementById('traffic-list');
+      container.innerHTML = '';
+      (data.streets || []).slice(0, 8).forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'traffic-card';
+        row.innerHTML = `
+          <span class="traffic-name">${escapeHtml(s.name)}</span>
+          <span class="traffic-badge badge-${s.traffic_level}">${s.traffic_level}</span>
+        `;
+        container.appendChild(row);
+      });
+    });
+}
+
 function toggleMobileSheet() {
   const sidebar = document.getElementById('sidebar');
   sidebar.classList.toggle('sheet-collapsed');
 }
 
-// Auto collapse bottom sheet on mobile screens when map is tapped
-if (window.innerWidth <= 768) {
-  document.getElementById('sidebar').classList.add('sheet-collapsed');
-}
+// --------------------------------------------------------------------------
+// Admin Curation & ML Feedback Logic
+// --------------------------------------------------------------------------
 
-// ---------------- Map setup ----------------
-const map = L.map('map', { zoomControl: false, attributionControl: false }).setView(CENTER, 15);
-L.control.zoom({ position: 'bottomright' }).addTo(map);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  maxZoom: 19,
-}).addTo(map);
-
-const parkingLayer = L.layerGroup().addTo(map);
-const recMarkersLayer = L.layerGroup().addTo(map);
-let destMarker = null;
-let destination = null; // { lat, lon }
-
-// Admin mode state
-let isAdmin = false;
-let isLoggingML = false;
-let activeAdminLayer = null;
-let activeAdminIsNew = false;
-
-// ---------------- Presets ----------------
-const presetsEl = document.getElementById('presets');
-PRESETS.forEach(p => {
-  const btn = document.createElement('button');
-  btn.className = 'preset-btn';
-  btn.textContent = p.label;
-  btn.onclick = () => {
-    setDestination(p.lat, p.lon);
-    if (window.innerWidth <= 768) {
-      document.getElementById('sidebar').classList.remove('sheet-collapsed');
-    }
-  };
-  presetsEl.appendChild(btn);
-});
-
-document.getElementById('clear-destination').onclick = () => {
-  destination = null;
-  document.getElementById('destination-active').style.display = 'none';
-  document.getElementById('hint-banner').style.display = 'flex';
-  if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
-  recMarkersLayer.clearLayers();
-  document.getElementById('rec-list').innerHTML =
-    '<div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>';
-};
-
-map.on('click', async (e) => {
-  if (isLoggingML) {
-    const lat = e.latlng.lat;
-    const lon = e.latlng.lng;
-    
-    // Quick visual feedback marker
-    const successMarker = L.circleMarker([lat, lon], {
-        color: 'var(--leaf)', fillColor: 'var(--leaf)', fillOpacity: 1, radius: 8
-    }).addTo(map);
-    setTimeout(() => map.removeLayer(successMarker), 2500);
-
-    // Send successful parking spot point to training file
-    await fetch('/api/admin/ml_feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lon })
-    });
-    
-    document.getElementById('ml-log-toggle').click(); // toggle off state
-    alert("Successfully recorded parking location for ML training algorithm!");
-    return;
-  }
-  
-  if (isAdmin) return; // Do not place destination pin when drafting segments in admin mode
-  setDestination(e.latlng.lat, e.latlng.lng);
-});
-
-function setDestination(lat, lon) {
-  destination = { lat, lon };
-  document.getElementById('hint-banner').style.display = 'none';
-  document.getElementById('destination-active').style.display = 'block';
-  document.getElementById('dest-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-
-  if (destMarker) map.removeLayer(destMarker);
-  destMarker = L.marker([lat, lon], {
-    icon: L.divIcon({ className: '', html: '<div class="dest-marker"></div>', iconSize: [18, 18] })
-  }).addTo(map);
-
-  map.panTo([lat, lon]);
-  fetchRecommendations(lat, lon);
-}
-
-// ---------------- Parking layer ----------------
-async function loadParking() {
-  const res = await fetch('/api/parking');
-  const data = await res.json();
-  parkingLayer.clearLayers();
-
-  data.features.forEach(f => {
-    const props = f.properties;
-    const popup = `
-      <div style="font-family:Inter,sans-serif;min-width:180px;">
-        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13.5px;margin-bottom:4px;">${props.name}</div>
-        <div style="font-size:12px;color:#555;margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;">${TYPE_LABEL[props.parking_type] || props.parking_type} parking</div>
-        <div style="font-size:12.5px;line-height:1.6;">
-          Status: <b>${props.occupancy_status}</b><br/>
-          Availability: <b>${props.availability_pct}%</b><br/>
-          Traffic: <b>${props.traffic_level}</b>
-        </div>
-      </div>`;
-
-    let layer;
-    if (f.geometry.type === 'LineString') {
-      const latlngs = f.geometry.coordinates.map(c => [c[1], c[0]]);
-      const opacity = props.parking_type === 'unavailable' ? 0.35 : (0.45 + (props.availability_pct / 100) * 0.5);
-      layer = L.polyline(latlngs, { color: props.color, weight: 6, opacity });
-    } else if (f.geometry.type === 'Polygon') {
-      const latlngs = f.geometry.coordinates[0].map(c => [c[1], c[0]]);
-      layer = L.polygon(latlngs, { color: '#2980b9', fillColor: props.color, fillOpacity: 0.4, weight: 2 });
-    }
-
-    if (layer) {
-      if (isAdmin) {
-        layer.on('click', (e) => {
-          L.DomEvent.stopPropagation(e);
-          openAdminModal(layer, props, f.geometry.type, f.geometry.coordinates);
-        });
-      } else {
-        layer.bindPopup(popup);
-      }
-      layer.addTo(parkingLayer);
-    }
-  });
-}
-
-// ---------------- Recommendations ----------------
-function gaugeStyle(pct, color) {
-  return `background: conic-gradient(${color} ${pct * 3.6}deg, var(--basalt-700) 0deg);`;
-}
-
-async function fetchRecommendations(lat, lon) {
-  const res = await fetch(`/api/recommend?lat=${lat}&lon=${lon}&radius=500`);
-  const data = await res.json();
-  const listEl = document.getElementById('rec-list');
-  recMarkersLayer.clearLayers();
-
-  if (!data.recommendations || data.recommendations.length === 0) {
-    listEl.innerHTML = '<div id="rec-empty">No parking segments found within 500&nbsp;m of this point. Try clicking closer to a mapped street.</div>';
-    return;
-  }
-
-  listEl.innerHTML = '';
-  data.recommendations.forEach((r, i) => {
-    const color = r.color;
-    const card = document.createElement('div');
-    card.className = 'rec-card';
-    card.innerHTML = `
-      <div class="rec-rank">${i + 1}</div>
-      <div class="gauge" style="${gaugeStyle(r.availability_pct, color)}">
-        <div class="gauge-inner">${Math.round(r.availability_pct)}%</div>
-      </div>
-      <div class="rec-body">
-        <div class="rec-name">${r.name}</div>
-        <div class="rec-meta">
-          <span class="pill pill-${r.parking_type}">${TYPE_LABEL[r.parking_type]}</span>
-          <span>${r.distance_m} m &middot; ${r.walk_time_min} min walk</span>
-        </div>
-        <div class="rec-meta">
-          <span>Score ${r.score}</span>
-          <span style="color:var(--fog)">&bull;</span>
-          <span>${r.occupancy_status}</span>
-        </div>
-      </div>
-    `;
-    listEl.appendChild(card);
-
-    const marker = L.marker([r.location.lat, r.location.lon], {
-      icon: L.divIcon({ className: '', html: `<div class="rec-marker"><span>${i + 1}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 26] })
-    });
-    marker.bindPopup(`<b>#${i + 1} &middot; ${r.name}</b><br/>Score ${r.score} &middot; ${r.availability_pct}% open`);
-    marker.addTo(recMarkersLayer);
-  });
-}
-
-// ---------------- Traffic & Weather panel ----------------
-async function loadTraffic() {
-  const res = await fetch('/api/traffic');
-  const data = await res.json();
-
-  const overallEl = document.getElementById('overall-level');
-  overallEl.textContent = data.overall_level;
-  overallEl.style.color = data.overall_level === 'Low' ? 'var(--leaf)'
-    : data.overall_level === 'Medium' ? 'var(--apricot)' : 'var(--alert)';
-
-  const listEl = document.getElementById('traffic-list');
-  listEl.innerHTML = '';
-  data.streets.slice(0, 8).forEach(s => {
-    const row = document.createElement('div');
-    row.className = 'traffic-card';
-    row.innerHTML = `
-      <span class="traffic-name">${s.name}</span>
-      <span class="traffic-badge badge-${s.traffic_level}">${s.traffic_level}</span>
-    `;
-    listEl.appendChild(row);
-  });
-}
-
-async function loadWeather() {
-  try {
-    const res = await fetch('/api/weather');
-    const data = await res.json();
-    document.getElementById('weather-display').textContent = `${data.temp_c}°C, ${data.condition}`;
-  } catch (err) {
-    console.error("Failed to load weather", err);
-  }
-}
-loadWeather();
-setInterval(loadWeather, 600000); // refresh every 10 mins
-
-// ---------------- Clock ----------------
-function tickClock() {
-  const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-setInterval(tickClock, 1000);
-tickClock();
-
-// ---------------- Admin / Curation Mode & ML Logging ----------------
-
-document.getElementById('ml-log-toggle').onclick = () => {
-  isLoggingML = !isLoggingML;
-  const btn = document.getElementById('ml-log-toggle');
-  const hintText = document.getElementById('hint-text');
-
-  if (isLoggingML) {
-    btn.textContent = "Click map to log spot...";
-    btn.classList.add('active');
-    hintText.textContent = "ML Log Mode: Click on the map where you found a parking spot";
-    document.getElementById('hint-banner').style.display = 'flex';
-    
-    // Automatically turn off standard Admin Mode if it's currently on
-    if (isAdmin) document.getElementById('admin-toggle').click();
-  } else {
-    btn.textContent = "Log ML Parking";
-    btn.classList.remove('active');
-    hintText.textContent = destination ? "" : "Click the map to set a destination";
-    if(destination) document.getElementById('hint-banner').style.display = 'none';
-  }
-};
-
-document.getElementById('admin-toggle').onclick = () => {
-  isAdmin = !isAdmin;
+function toggleAdminMode() {
+  isAdminMode = !isAdminMode;
   const btn = document.getElementById('admin-toggle');
-  const hintText = document.getElementById('hint-text');
-
-  if (isAdmin) {
-    btn.textContent = "Exit Admin Mode";
+  if (isAdminMode) {
     btn.classList.add('active');
-    hintText.textContent = "Admin Mode: Click segment to edit, or draw new shape";
-    document.getElementById('hint-banner').style.display = 'flex';
-    
-    // Automatically turn off ML Logging Mode if it's currently on
-    if (isLoggingML) document.getElementById('ml-log-toggle').click();
-    
-    // Enable Leaflet Geoman Toolbar
-    map.pm.addControls({
-      position: 'topleft',
-      drawMarker: false,
-      drawCircleMarker: false,
-      drawCircle: false,
-      drawPolyline: true,
-      drawRectangle: true,
-      drawPolygon: true,
-      editMode: true,
-      dragMode: true,
-      cutPolygon: false,
-      removalMode: false,
-    });
+    btn.innerText = 'Exit Curation Mode';
+    if (map.pm) {
+      map.pm.addControls({ position: 'topright', drawCircle: false, drawMarker: false });
+    }
   } else {
-    btn.textContent = "Admin / Curation Mode";
     btn.classList.remove('active');
-    hintText.textContent = destination ? "" : "Click the map to set a destination";
-    if(destination) document.getElementById('hint-banner').style.display = 'none';
-    map.pm.removeControls();
+    btn.innerText = 'Admin / Curation Mode';
+    if (map.pm) {
+      map.pm.removeControls();
+    }
     closeAdminModal();
   }
-  loadParking(); // Re-render layers with correct click handlers
-};
+  loadParkingData();
+}
 
-// Listen for newly drawn shapes via Leaflet-Geoman
-map.on('pm:create', e => {
-  if (!isAdmin) return;
-  openAdminModal(e.layer, null, e.shape === 'Line' ? 'LineString' : 'Polygon');
-});
-
-function openAdminModal(layer, props = null, geomTypeOverride = null, existingCoords = null) {
-  let geomType = geomTypeOverride;
-  let coords = existingCoords;
-
-  if (!coords) {
-    if (layer instanceof L.Polygon) {
-      geomType = 'Polygon';
-      let latlngs = layer.getLatLngs()[0];
-      coords = [latlngs.map(ll => [ll.lng, ll.lat])];
-      if (coords[0].length > 0) coords[0].push(coords[0][0]); // close polygon loop
-    } else {
-      geomType = 'LineString';
-      coords = layer.getLatLngs().map(ll => [ll.lng, ll.lat]);
-    }
+function logMLFeedback() {
+  if (!currentDest) {
+    alert('Please set a destination or search an address first to log parking feedback!');
+    return;
   }
+  fetch('/api/admin/ml_feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lat: currentDest.lat, lon: currentDest.lon })
+  })
+  .then(r => r.json())
+  .then(() => {
+    alert('Parking location successfully recorded for ML model training!');
+  });
+}
 
-  document.getElementById('edit-id').value = props ? props.id : Math.random().toString(36).substring(2, 12);
-  document.getElementById('edit-name').value = props ? props.name : '';
-  document.getElementById('edit-type').value = props ? props.parking_type : 'free';
-  document.getElementById('edit-geom-type').value = geomType;
-  document.getElementById('edit-coords').value = JSON.stringify(coords);
-
-  document.getElementById('admin-modal-title').textContent = props ? 'Edit Parking Segment' : 'New Parking Segment';
-  document.getElementById('btn-delete').style.display = props ? 'inline-block' : 'none';
+function openAdminModal(feature) {
+  const props = feature.properties || feature;
+  document.getElementById('edit-id').value = props.id || '';
+  document.getElementById('edit-name').value = props.name || '';
+  document.getElementById('edit-type').value = props.parking_type || 'free';
   document.getElementById('admin-modal').classList.remove('hidden');
-
-  activeAdminLayer = layer;
-  activeAdminIsNew = !props;
 }
 
 function closeAdminModal() {
   document.getElementById('admin-modal').classList.add('hidden');
-  if (activeAdminIsNew && activeAdminLayer) {
-    map.removeLayer(activeAdminLayer);
-  }
-  activeAdminLayer = null;
 }
 
-async function saveAdminFeature() {
-  const coords = JSON.parse(document.getElementById('edit-coords').value);
-  let center = [40.1792, 44.5152];
-
-  if (activeAdminLayer) {
-    const bounds = activeAdminLayer.getBounds();
-    const c = bounds.getCenter();
-    center = [c.lng, c.lat];
-  } else if (coords.length > 0) {
-    const firstCoord = Array.isArray(coords[0][0]) ? coords[0][0] : coords[0];
-    center = [firstCoord[0], firstCoord[1]];
-  }
+function saveAdminFeature() {
+  const id = document.getElementById('edit-id').value || 'seg_' + Date.now();
+  const name = document.getElementById('edit-name').value || 'New Segment';
+  const parkingType = document.getElementById('edit-type').value;
 
   const payload = {
-    id: document.getElementById('edit-id').value,
-    name: document.getElementById('edit-name').value || "Unnamed segment",
-    parking_type: document.getElementById('edit-type').value,
-    geometry_type: document.getElementById('edit-geom-type').value,
-    coordinates: coords,
-    centroid: center
+    id: id,
+    name: name,
+    parking_type: parkingType,
+    geometry_type: 'LineString',
+    coordinates: [[44.5122, 40.1808], [44.5133, 40.1795]]
   };
 
-  await fetch('/api/admin/feature', {
+  fetch('/api/admin/feature', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(() => {
+    closeAdminModal();
+    loadParkingData();
   });
+}
 
+function deleteAdminFeature() {
   closeAdminModal();
-  refreshAll();
-}
-
-async function deleteAdminFeature() {
-  const id = document.getElementById('edit-id').value;
-  if (!id) return;
-
-  await fetch(`/api/admin/feature/${id}`, { method: 'DELETE' });
-  closeAdminModal();
-  refreshAll();
-}
-
-// ---------------- Refresh cycle ----------------
-function refreshAll() {
-  loadParking();
-  loadTraffic();
-  if (destination) fetchRecommendations(destination.lat, destination.lon);
-}
-refreshAll();
-setInterval(refreshAll, 15000);
-
-// ---------------- Service Worker Registration (PWA) ----------------
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then(reg => console.log('[PWA] Service Worker registered:', reg.scope))
-      .catch(err => console.error('[PWA] Service Worker registration failed:', err));
-  });
 }
 </script>
-
 </body>
 </html>

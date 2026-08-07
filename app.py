@@ -14,8 +14,9 @@ Production-ready Flask backend that:
   4. Serves the parking network as GeoJSON (/api/parking).
   5. Serves a multi-factor destination recommendation engine (/api/recommend).
   6. Serves a rolled-up live traffic snapshot (/api/traffic).
-  7. Serves an admin curation API to add, edit, or delete ground-truth segments (/api/admin/feature).
-  8. Serves an ML feedback API to record successful parking inputs (/api/admin/ml_feedback).
+  7. Serves an administrative curation API (/api/admin/feature).
+  8. Serves an ML feedback recording API (/api/admin/ml_feedback).
+  9. Serves a live search/autocomplete geocoding engine (/api/search).
 
 Run:
     pip install -r requirements.txt
@@ -32,6 +33,7 @@ import os
 import random
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -50,7 +52,7 @@ MAP_CENTER = (40.1792, 44.5152)
 DATA_DIR = Path(__file__).parent / "data"
 CACHE_FILE = DATA_DIR / "parking_cache.geojson"
 GROUND_TRUTH_FILE = DATA_DIR / "ground_truth.geojson"
-ML_DATA_FILE = DATA_DIR / "ml_training_data.json" # Added ML Training file
+ML_DATA_FILE = DATA_DIR / "ml_training_data.json"
 DATA_DIR.mkdir(exist_ok=True)
 
 PARKING_TAGS = {
@@ -61,7 +63,6 @@ PARKING_TAGS = {
     "amenity": "parking",
 }
 
-# Visual language carried over from the original Folium script + ground truth
 TYPE_COLORS = {
     "paid": "#e74c3c",         # Red lines
     "free": "#2ecc71",         # Green curbside lanes
@@ -70,14 +71,40 @@ TYPE_COLORS = {
     "unspecified": "#7f8c8d",  # Grey / general
 }
 
-# Base recommendation weight per parking type: Free is preferred over Paid,
-# dedicated lots score well for reliability, unspecified segments trail, unavailable ignored.
 TYPE_BASE_WEIGHT = {
     "free": 100,
     "lot": 85,
     "paid": 70,
     "unspecified": 45,
     "unavailable": 0,
+}
+
+# Phonetic / transliteration synonyms for fuzzy matching Yerevan streets
+YEREVAN_STREET_SYNONYMS = {
+    "mastoc": "Mashtots",
+    "mashtoc": "Mashtots",
+    "mashtos": "Mashtots",
+    "մաշտոց": "Mashtots",
+    "abovian": "Abovyan",
+    "աբովյան": "Abovyan",
+    "toumanian": "Tumanyan",
+    "thoumanian": "Tumanyan",
+    "թումանյան": "Tumanyan",
+    "saryan": "Saryan",
+    "սարյան": "Saryan",
+    "sayat": "Sayat-Nova",
+    "սայաթ": "Sayat-Nova",
+    "bagramyan": "Baghramyan",
+    "bagramian": "Baghramyan",
+    "բաղրամյան": "Baghramyan",
+    "amirian": "Amiryan",
+    "ամիրյան": "Amiryan",
+    "terian": "Teryan",
+    "տերյան": "Teryan",
+    "pushkin": "Pushkin",
+    "պուշկին": "Pushkin",
+    "northern": "Northern Avenue",
+    "republic": "Republic Square",
 }
 
 app = Flask(__name__)
@@ -110,7 +137,6 @@ POI_WEIGHTS = {
     "tourist_attraction": 3,
 }
 
-# Curated ground-truth POI dataset for Kentron, Yerevan.
 FALLBACK_POIS = [
     {"name": "Dolmama Restaurant", "type": "restaurant", "lat": 40.1812, "lon": 44.5140},
     {"name": "Lavash Restaurant", "type": "restaurant", "lat": 40.1835, "lon": 44.5125},
@@ -160,18 +186,17 @@ FALLBACK_POIS = [
 
 
 def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
-    """Calculates hourly demand factor for specific POI categories based on time profiles."""
     if poi_type == "restaurant":
         if 12 <= hour <= 14:
-            return 0.95  # Lunch peak
+            return 0.95
         if 18 <= hour <= 22:
-            return 1.00  # Dinner peak
+            return 1.00
         if 11 <= hour <= 17:
             return 0.50
         return 0.15
     elif poi_type in ("cafe", "coffee_shop"):
         if 8 <= hour <= 11:
-            return 1.00  # Morning peak
+            return 1.00
         if 12 <= hour <= 18:
             return 0.70
         if 19 <= hour <= 22:
@@ -179,7 +204,7 @@ def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
         return 0.10
     elif poi_type == "bar":
         if 20 <= hour <= 23 or 0 <= hour <= 1:
-            return 1.00  # Night peak
+            return 1.00
         if 17 <= hour <= 19:
             return 0.50
         return 0.05
@@ -187,18 +212,18 @@ def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
         if is_weekend:
             return 0.10
         if 9 <= hour <= 17:
-            return 1.00  # Standard daytime operating hours
+            return 1.00
         if hour == 8 or hour == 18:
             return 0.50
         return 0.05
     elif poi_type in ("shopping_centre", "supermarket", "convenience"):
         if 12 <= hour <= 20:
-            return 1.00  # Afternoon / evening shopping
+            return 1.00
         if 9 <= hour <= 11 or 21 <= hour <= 22:
             return 0.55
         return 0.15
     elif poi_type in ("hospital", "pharmacy"):
-        return 0.85 if 8 <= hour <= 20 else 0.50  # Constant activity
+        return 0.85 if 8 <= hour <= 20 else 0.50
     elif poi_type in ("museum", "tourist_attraction"):
         if 10 <= hour <= 18:
             return 1.00
@@ -207,7 +232,7 @@ def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
         return 0.05
     elif poi_type in ("metro_station", "bus_station"):
         if (8 <= hour <= 10) or (17 <= hour <= 19):
-            return 1.00  # Commute hours
+            return 1.00
         if 10 <= hour <= 16:
             return 0.60
         if 20 <= hour <= 23:
@@ -228,14 +253,10 @@ def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
     return 0.40
 
 
-_BUSYNESS_CACHE: dict[str, tuple[float, float]] = {}  # key -> (timestamp, score)
+_BUSYNESS_CACHE: dict[str, tuple[float, float]] = {}
 
 
 def calculate_destination_busyness(lat: float, lon: float, now: datetime | None = None) -> float:
-    """
-    Computes a deterministic POI busyness score (0.0 to 1.0) for a segment location.
-    Searches nearby POIs within ~350m radius and scales by weight and hourly curve.
-    """
     now = now or datetime.now()
     hour = now.hour
     is_weekend = now.weekday() >= 5
@@ -245,7 +266,7 @@ def calculate_destination_busyness(lat: float, lon: float, now: datetime | None 
 
     if cache_key in _BUSYNESS_CACHE:
         ts, cached_score = _BUSYNESS_CACHE[cache_key]
-        if now_ts - ts < 300:  # 5 min cache
+        if now_ts - ts < 300:
             return cached_score
 
     total_raw_impact = 0.0
@@ -259,7 +280,6 @@ def calculate_destination_busyness(lat: float, lon: float, now: datetime | None 
             hourly_factor = get_poi_hourly_factor(poi["type"], hour, is_weekend)
             total_raw_impact += weight * hourly_factor * decay
 
-    # Soft normalization: raw impact of ~18+ maps to ~1.0
     normalized_score = min(1.0, round(total_raw_impact / 18.0, 2))
     _BUSYNESS_CACHE[cache_key] = (now_ts, normalized_score)
     return normalized_score
@@ -273,48 +293,32 @@ _TRAFFIC_CACHE = {"timestamp": 0.0, "multiplier": 1.0}
 
 
 def fetch_live_traffic_multiplier() -> float:
-    """
-    Fetches live traffic multiplier using the Yandex Routing API.
-    (1.0 = normal, >1.0 = heavy traffic).
-    Supports free API key tier for <1000 requests.
-    """
     now_ts = time.time()
-    
-    # Ensure cache exists to prevent spamming the API
     global _TRAFFIC_CACHE
     if "_TRAFFIC_CACHE" not in globals():
         _TRAFFIC_CACHE = {"timestamp": 0, "multiplier": 1.0}
 
-    if now_ts - _TRAFFIC_CACHE["timestamp"] < 180:  # Cache for 3 minutes
+    if now_ts - _TRAFFIC_CACHE["timestamp"] < 180:
         return _TRAFFIC_CACHE["multiplier"]
 
-    # --- ENTER YOUR YANDEX ROUTING API KEY HERE ---
     yandex_routing_key = os.environ.get("YANDEX_ROUTING_API_KEY", "a3c71f9f-d1d6-4319-a690-e1866877ac8e")
     multiplier = 1.0
 
     try:
         if yandex_routing_key and yandex_routing_key != "a3c71f9f-d1d6-4319-a690-e1866877ac8e":
-            # Create a localized sample route around the map center (Kentron, Yerevan) 
-            # to calculate Yandex's real-time traffic delay ratio.
             origin = f"{MAP_CENTER[0]},{MAP_CENTER[1]}"
-            destination = f"{MAP_CENTER[0] + 0.01},{MAP_CENTER[1] + 0.01}" 
-            
-            # Yandex Routing V2 Endpoint
+            destination = f"{MAP_CENTER[0] + 0.01},{MAP_CENTER[1] + 0.01}"
             url = f"https://api.routing.yandex.net/v2/route?waypoints={origin}|{destination}&apikey={yandex_routing_key}"
             
             req = urllib.request.Request(url, headers={"User-Agent": "YerevanParkingApp/1.0"})
             with urllib.request.urlopen(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode())
-                
-                # Safely parse Yandex Route API response
                 if "route" in data and "legs" in data["route"] and len(data["route"]["legs"]) > 0:
                     weight_data = data["route"]["legs"][0].get("weight", {})
                     time_normal = weight_data.get("time", {}).get("value", 1)
                     time_traffic = weight_data.get("time_with_traffic", {}).get("value", time_normal)
-                    
                     if time_normal > 0:
                         ratio = time_traffic / time_normal
-                        # Bound the multiplier between 0.8 (empty roads) and 1.5 (heavy gridlock)
                         multiplier = max(0.8, min(1.5, ratio))
     except Exception as exc:
         print(f"[traffic] Yandex Routing API call skipped/failed ({exc}); using simulated traffic multiplier 1.0.")
@@ -341,13 +345,8 @@ _WEATHER_CACHE = {
 
 
 def fetch_live_weather() -> dict:
-    """
-    Fetches real-time weather data (temperature, conditions, demand factor).
-    Uses Open-Meteo free keyless API as default or OpenWeather if key provided.
-    Caches results for 10 minutes; falls back gracefully to neutral clear weather on error.
-    """
     now_ts = time.time()
-    if now_ts - _WEATHER_CACHE["timestamp"] < 600:  # Cache for 10 mins
+    if now_ts - _WEATHER_CACHE["timestamp"] < 600:
         return _WEATHER_CACHE["data"]
 
     openweather_key = os.environ.get("944c65db587556cae940016ce322f6d3")
@@ -382,7 +381,6 @@ def fetch_live_weather() -> dict:
                     "summary": f"{round(temp)}°C, {main_cond}",
                 }
         else:
-            # Keyless free API: Open-Meteo
             url = f"https://api.open-meteo.com/v1/forecast?latitude={MAP_CENTER[0]}&longitude={MAP_CENTER[1]}&current_weather=true"
             req = urllib.request.Request(url, headers={"User-Agent": "YerevanParkingApp/1.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -427,7 +425,6 @@ def fetch_live_weather() -> dict:
 # --------------------------------------------------------------------------
 
 def _classify_segment(row: dict) -> str:
-    """Reproduce the color/category logic from the original Folium script."""
     has_fee = any(
         row.get(f"parking:{side}:fee") == "yes"
         for side in ["left", "right", "both", "lane"]
@@ -443,14 +440,12 @@ def _classify_segment(row: dict) -> str:
 
 
 def _linestring_midpoint(coords: list[tuple[float, float]]) -> tuple[float, float]:
-    """coords are (lat, lon) pairs; return the midpoint along the line."""
     mid = coords[len(coords) // 2]
     return mid
 
 
 def _fetch_from_osmnx() -> list[dict]:
-    """Attempt a live OSMnx/Overpass fetch. Raises on any failure."""
-    import osmnx as ox  # imported lazily so the app still boots without it
+    import osmnx as ox
 
     gdf = ox.features_from_place(PLACE_NAME, tags=PARKING_TAGS)
     features = []
@@ -478,8 +473,8 @@ def _fetch_from_osmnx() -> list[dict]:
             features.append({
                 "id": seg_id,
                 "geometry_type": "LineString",
-                "coordinates": [[lon, lat] for lat, lon in coords],  # GeoJSON lon/lat order
-                "centroid": [centroid[1], centroid[0]],  # [lon, lat]
+                "coordinates": [[lon, lat] for lat, lon in coords],
+                "centroid": [centroid[1], centroid[0]],
                 "name": street_name,
                 "parking_type": parking_type,
             })
@@ -498,7 +493,7 @@ def _fetch_from_osmnx() -> list[dict]:
                 "id": seg_id,
                 "geometry_type": "Polygon",
                 "coordinates": rings,
-                "centroid": [centroid_point.x, centroid_point.y],  # [lon, lat]
+                "centroid": [centroid_point.x, centroid_point.y],
                 "name": street_name,
                 "parking_type": "lot",
             })
@@ -509,11 +504,6 @@ def _fetch_from_osmnx() -> list[dict]:
 
 
 def _fallback_dataset() -> list[dict]:
-    """
-    Hand-built dataset covering well-known Kentron streets so the app is
-    fully demoable without network / Overpass access. Coordinates are
-    approximate real-world alignments for these corridors.
-    """
     raw = [
         ("Northern Avenue", "paid", [
             [40.1808, 44.5122], [40.1795, 44.5133], [40.1783, 44.5144], [40.1772, 44.5155],
@@ -606,12 +596,8 @@ def _fallback_dataset() -> list[dict]:
 
     return features
 
-# -------------------------------------------------------------------
-# HELPER FUNCTION (Must be defined OUTSIDE of any route)
-# -------------------------------------------------------------------
+
 def _extract_lat_lon(feature: dict) -> tuple[float, float]:
-    """Safely extract (lat, lon) for Yerevan from both standard GeoJSON and custom dicts."""
-    # 1. Check direct centroid
     if "centroid" in feature and feature["centroid"]:
         c0, c1 = feature["centroid"]
         if 38.0 <= c0 <= 42.0 and 43.0 <= c1 <= 47.0:
@@ -619,7 +605,6 @@ def _extract_lat_lon(feature: dict) -> tuple[float, float]:
         elif 38.0 <= c1 <= 42.0 and 43.0 <= c0 <= 47.0:
             return float(c1), float(c0)
 
-    # 2. Extract geometry & properties (handles raw GeoJSON features)
     geom = feature.get("geometry", {}) if "geometry" in feature else feature
     props = feature.get("properties", {}) if "properties" in feature else feature
     
@@ -634,7 +619,6 @@ def _extract_lat_lon(feature: dict) -> tuple[float, float]:
     if not coords:
         return MAP_CENTER[0], MAP_CENTER[1]
 
-    # Handle Polygon / MultiPolygon wrapping
     pts = coords
     while isinstance(pts, list) and len(pts) > 0 and isinstance(pts[0], list) and len(pts[0]) > 0 and isinstance(pts[0][0], list):
         pts = pts[0]
@@ -652,12 +636,10 @@ def _extract_lat_lon(feature: dict) -> tuple[float, float]:
 
 
 def _normalize_feature(f: dict) -> dict:
-    """Normalizes standard GeoJSON or custom dicts into a unified internal segment object."""
     props = f.get("properties", {}) if isinstance(f.get("properties"), dict) else f
     geom = f.get("geometry", {}) if isinstance(f.get("geometry"), dict) else f
 
     seg_id = str(f.get("id") or props.get("id") or "unk")
-
     raw_name = props.get("name") or f.get("name") or "Parking Segment"
     clean_name = raw_name if isinstance(raw_name, str) else "Unnamed Segment"
 
@@ -677,7 +659,6 @@ def _normalize_feature(f: dict) -> dict:
     }
 
 def load_parking_features(force_refresh: bool = False) -> list[dict]:
-    """Loads parking geometry, normalizing all features on startup."""
     if not force_refresh and GROUND_TRUTH_FILE.exists():
         try:
             raw_features = json.loads(GROUND_TRUTH_FILE.read_text())["features"]
@@ -711,7 +692,6 @@ PARKING_FEATURES: list[dict] = load_parking_features()
 
 
 def _save_ground_truth():
-    """Writes the current state of PARKING_FEATURES to the ground-truth dataset."""
     GROUND_TRUTH_FILE.write_text(json.dumps({"features": PARKING_FEATURES}, ensure_ascii=False))
 
 
@@ -720,10 +700,6 @@ def _save_ground_truth():
 # --------------------------------------------------------------------------
 
 def _hour_congestion_curve(hour: int, is_weekend: bool) -> float:
-    """
-    Returns a congestion factor in [0, 1] for a given hour of day.
-    Modeled on typical Kentron rush-hour behavior.
-    """
     if is_weekend:
         curve = {
             0: .10, 1: .05, 2: .05, 3: .05, 4: .05, 5: .08, 6: .12, 7: .18,
@@ -742,13 +718,6 @@ def _hour_congestion_curve(hour: int, is_weekend: bool) -> float:
 
 
 def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | None = None) -> dict:
-    """
-    Deterministic-per-segment, time-varying base simulation of:
-      - availability_pct   (0-100, higher = more open spots)
-      - congestion_score   (0-100, higher = worse traffic on that block)
-      - occupancy_status   (Available / Filling Fast / Occupied / Unavailable)
-      - traffic_level      (Low / Medium / Heavy)
-    """
     if parking_type == "unavailable":
         return {
             "availability_pct": 0.0,
@@ -762,7 +731,7 @@ def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | N
     base = _hour_congestion_curve(now.hour, is_weekend)
     next_hour_base = _hour_congestion_curve((now.hour + 1) % 24, is_weekend)
     frac = now.minute / 60.0
-    congestion_factor = base + (next_hour_base - base) * frac  # 0..1
+    congestion_factor = base + (next_hour_base - base) * frac
 
     seed_key = f"{segment_id}-{now.strftime('%Y%m%d%H%M')}"
     rng = random.Random(seed_key)
@@ -798,12 +767,7 @@ def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | N
     }
 
 
-# --------------------------------------------------------------------------
-# Geo helpers
-# --------------------------------------------------------------------------
-
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in meters."""
     R = 6371000.0
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -813,7 +777,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 # --------------------------------------------------------------------------
-# Routes: pages
+# Routes: pages & PWA
 # --------------------------------------------------------------------------
 
 @app.route("/")
@@ -826,13 +790,8 @@ def index():
     )
 
 
-# --------------------------------------------------------------------------
-# Routes: PWA Enablers
-# --------------------------------------------------------------------------
-
 @app.route("/manifest.json")
 def pwa_manifest():
-    """Serves the PWA manifest for Android/iOS installation."""
     manifest_data = {
         "name": "Yerevan Smart Parking Recommender",
         "short_name": "SmartParking",
@@ -856,9 +815,9 @@ def pwa_manifest():
     }
     return jsonify(manifest_data)
 
+
 @app.route("/sw.js")
 def service_worker():
-    """Serves the Service Worker required for PWA caching and installation logic."""
     js = """
     const CACHE_NAME = 'yerevan-parking-v1';
     const urlsToCache = [
@@ -879,11 +838,9 @@ def service_worker():
     self.addEventListener('fetch', event => {
         event.respondWith(
             caches.match(event.request).then(response => {
-                // Cache hit - return response
                 if (response) {
                     return response;
                 }
-                // For live API routes, fetch from network
                 return fetch(event.request);
             })
         );
@@ -895,18 +852,141 @@ def service_worker():
 
 
 # --------------------------------------------------------------------------
-# Routes: API
+# Routes: Search & Geocoding Autocomplete API
+# --------------------------------------------------------------------------
+
+@app.route("/api/search")
+def api_search():
+    """
+    Search-as-you-type endpoint for addresses & POIs in Yerevan.
+    Handles typos, fuzzy matching, and exact house numbers (e.g. Mashtots 23/6).
+    Returns [] if no address matches exist.
+    """
+    query = request.args.get("q", "").strip()
+    if not query or len(query) < 2:
+        return jsonify([])
+
+    # Apply synonym/transliteration normalization for common street names
+    normalized_q = query.lower()
+    for syn, target in YEREVAN_STREET_SYNONYMS.items():
+        if syn in normalized_q:
+            normalized_q = normalized_q.replace(syn, target.lower())
+
+    results = []
+    seen_keys = set()
+
+    # 1. Local POIs & Ground-Truth Segments Fuzzy Match
+    for poi in FALLBACK_POIS:
+        p_name = poi["name"]
+        if normalized_q in p_name.lower() or query.lower() in p_name.lower():
+            key = p_name.lower()
+            if key not in seen_keys:
+                seen_keys.add(key)
+                results.append({
+                    "title": p_name,
+                    "subtitle": f"Landmark ({poi['type'].replace('_', ' ').title()}) • Kentron, Yerevan",
+                    "lat": poi["lat"],
+                    "lon": poi["lon"],
+                })
+
+    for f in PARKING_FEATURES:
+        f_name = f.get("name", "")
+        if f_name and f_name != "Unnamed Segment":
+            if normalized_q in f_name.lower() or query.lower() in f_name.lower():
+                key = f_name.lower()
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    lat, lon = _extract_lat_lon(f)
+                    results.append({
+                        "title": f_name,
+                        "subtitle": "Street / Parking Segment • Yerevan",
+                        "lat": lat,
+                        "lon": lon,
+                    })
+
+    # 2. Photon API for fast search-as-you-type and typo tolerance
+    try:
+        search_term = urllib.parse.quote(normalized_q)
+        photon_url = f"https://photon.komoot.io/api/?q={search_term}&lat=40.1792&lon=44.5152&zoom=14&limit=8&bbox=44.40,40.10,44.60,40.25"
+        req = urllib.request.Request(photon_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            data = json.loads(resp.read().decode())
+            for feat in data.get("features", []):
+                props = feat.get("properties", {})
+                coords = feat.get("geometry", {}).get("coordinates", [])
+                if len(coords) == 2:
+                    lon, lat = coords[0], coords[1]
+                    housenumber = props.get("housenumber", "")
+                    street = props.get("street") or props.get("name") or ""
+                    city = props.get("city") or props.get("town") or "Yerevan"
+
+                    if street:
+                        title = f"{street} {housenumber}".strip() if housenumber else street
+                    else:
+                        title = props.get("name", "")
+
+                    if not title:
+                        continue
+
+                    sub_parts = [p for p in [props.get("district"), city, "Armenia"] if p]
+                    subtitle = ", ".join(sub_parts)
+
+                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
+                    if key not in seen_keys and title.lower() not in seen_keys:
+                        seen_keys.add(key)
+                        seen_keys.add(title.lower())
+                        results.append({
+                            "title": title,
+                            "subtitle": subtitle,
+                            "lat": lat,
+                            "lon": lon,
+                        })
+    except Exception as exc:
+        print(f"[search] Photon API call skipped/failed ({exc})")
+
+    # 3. OpenStreetMap Nominatim for exact address/building numbers (e.g., "Mashtots 23/6")
+    if len(results) < 4 or "/" in query or any(char.isdigit() for char in query):
+        try:
+            nom_q = urllib.parse.quote(f"{normalized_q}, Yerevan, Armenia")
+            nom_url = f"https://nominatim.openstreetmap.org/search?q={nom_q}&format=json&limit=5&bounded=0&viewbox=44.40,40.22,44.60,40.12"
+            req = urllib.request.Request(nom_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                data = json.loads(resp.read().decode())
+                for item in data:
+                    lat = float(item["lat"])
+                    lon = float(item["lon"])
+                    display_name = item.get("display_name", "")
+                    parts = [p.strip() for p in display_name.split(",")]
+                    title = ", ".join(parts[:2]) if len(parts) >= 2 else parts[0]
+                    subtitle = ", ".join(parts[2:4]) if len(parts) >= 4 else "Yerevan, Armenia"
+
+                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
+                    if key not in seen_keys and title.lower() not in seen_keys:
+                        seen_keys.add(key)
+                        seen_keys.add(title.lower())
+                        results.append({
+                            "title": title,
+                            "subtitle": subtitle,
+                            "lat": lat,
+                            "lon": lon,
+                        })
+        except Exception as exc:
+            print(f"[search] Nominatim API call skipped/failed ({exc})")
+
+    return jsonify(results[:8])
+
+
+# --------------------------------------------------------------------------
+# Routes: System APIs
 # --------------------------------------------------------------------------
 
 @app.route("/api/weather")
 def api_weather():
-    """Standalone endpoint returning top-level current weather string variables."""
     return jsonify(fetch_live_weather())
 
 
 @app.route("/api/parking")
 def api_parking():
-    """Full parking network as GeoJSON, with live-simulated metadata."""
     now = datetime.now()
     geojson_features = []
 
@@ -939,7 +1019,6 @@ def api_parking():
 
 @app.route("/api/traffic")
 def api_traffic():
-    """Rolled-up live traffic snapshot, grouped by street, for the sidebar cards."""
     now = datetime.now()
     by_street: dict[str, list[dict]] = {}
 
@@ -979,14 +1058,8 @@ def api_traffic():
     })
 
 
-# -------------------------------------------------------------------
-# FLASK ROUTE
-# -------------------------------------------------------------------
 @app.route("/api/recommend")
 def api_recommend():
-    """
-    Recommend the top 3 parking segments near a destination using a weighted multi-factor model.
-    """
     try:
         dest_lat = float(request.args.get("lat"))
         dest_lon = float(request.args.get("lon"))
@@ -1000,7 +1073,6 @@ def api_recommend():
     weather_info = fetch_live_weather()
     weather_factor = weather_info["weather_factor"]
 
-    # First pass: search within requested radius; second pass: expand radius if no candidates found
     for current_radius in [requested_radius, 1500.0, 3000.0]:
         candidates = []
         for f in PARKING_FEATURES:
@@ -1023,13 +1095,12 @@ def api_recommend():
 
             adjusted_avail = max(3.0, min(97.0, state["availability_pct"] - (dest_busyness * 20.0) - (weather_factor * 6.0)))
 
-            # UPDATED WEIGHTS: Highly prioritizing proximity to destination
-            busyness_component = (1.0 - dest_busyness) * 25.0 # (down from 45.0)
-            avail_component = (adjusted_avail / 100.0) * 20.0 # (down from 30.0)
+            busyness_component = (1.0 - dest_busyness) * 25.0
+            avail_component = (adjusted_avail / 100.0) * 20.0
             type_weight = TYPE_BASE_WEIGHT.get(parking_type, 45)
             type_component = (type_weight / 100.0) * 10.0
             traffic_component = (1.0 - traffic_factor) * 8.0
-            distance_component = max(0.0, 1.0 - (distance_m / current_radius)) * 35.0 # (up from 5.0)
+            distance_component = max(0.0, 1.0 - (distance_m / current_radius)) * 35.0
             weather_component = (1.0 - weather_factor) * 2.0
 
             final_score = round(
@@ -1043,7 +1114,6 @@ def api_recommend():
 
             occ_status = "Available" if adjusted_avail >= 60 else ("Filling Fast" if adjusted_avail >= 28 else "Occupied")
 
-            # Clean NaN names so JavaScript doesn't crash
             raw_name = f.get("name", f.get("properties", {}).get("name", "Parking Segment"))
             clean_name = raw_name if isinstance(raw_name, str) else "Unnamed Segment"
 
@@ -1087,13 +1157,8 @@ def api_recommend():
     })
 
 
-# --------------------------------------------------------------------------
-# Routes: Admin Curation API
-# --------------------------------------------------------------------------
-
 @app.route("/api/admin/feature", methods=["POST"])
 def api_admin_save_feature():
-    """Save or update a ground-truth segment feature persistently across sessions."""
     global PARKING_FEATURES
     data = request.json
     if not data:
@@ -1114,7 +1179,6 @@ def api_admin_save_feature():
     if not updated:
         PARKING_FEATURES.append(normalized)
 
-    # Persist directly to ground_truth.geojson
     _save_ground_truth()
 
     return jsonify({
@@ -1124,10 +1188,10 @@ def api_admin_save_feature():
         "total_segments": len(PARKING_FEATURES),
     })
 
+
 @app.route("/api/admin/ml_feedback", methods=["POST"])
 def api_admin_ml_feedback():
-    """Records where users successfully find a spot to train a future ML algorithm."""
-    data = request.json
+    data = request.json or {}
     now = datetime.now()
     weather = fetch_live_weather()
     traffic = fetch_live_traffic_multiplier()
@@ -1155,9 +1219,6 @@ def api_admin_ml_feedback():
 
     return jsonify({"status": "ok", "recorded": True})
 
-# --------------------------------------------------------------------------
-# Main Execution Entry Point
-# --------------------------------------------------------------------------
 
 if __name__ == "__main__":
     print("[server] Starting Yerevan Smart Parking Recommender server on http://127.0.0.1:5000")

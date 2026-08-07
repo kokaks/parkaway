@@ -1,4 +1,4 @@
-# Yerevan Smart Parking Recommender
+# Parkaway (Smart Parking Recommender for Kentron District in Yerevan, Armenia) 
 
 A Flask + Leaflet.js web app that turns your original Folium/OSMnx script into
 a live, interactive parking dashboard for Kentron, Yerevan.

@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#14151a" />
+<title>Yerevan Smart Parking</title>
+
+<!-- PWA Manifest and Apple Touch Icon Hooks -->
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/MUTCD_D4-1.svg/192px-MUTCD_D4-1.svg.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js"></script>
+
+<style>
+  :root {
+    --basalt-950: #14151a;
+    --basalt-900: #1b1d24;
+    --basalt-800: #24262f;
+    --basalt-700: #32343f;
+    --basalt-line: #3a3d4a;
+    --fog: #9498a6;
+    --paper: #eef0f4;
+    --apricot: #f5a536;
+    --apricot-dim: #7a5a2a;
+    --tuff-pink: #d9808a;
+    --leaf: #34c77b;
+    --alert: #e2574c;
+    --sapphire: #4d8ff0;
+    --unavailable: #f39c12;
+  }
+
+  * { 
+    box-sizing: border-box; 
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    margin: 0; padding: 0; 
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+    background: var(--basalt-950);
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+
+  .display { font-family: 'Space Grotesk', sans-serif; }
+
+  #app {
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+    position: relative;
+  }
+
+  /* ---------------- Sidebar ---------------- */
+  #sidebar {
+    background: var(--basalt-900);
+    border-right: 1px solid var(--basalt-line);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    z-index: 20;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Mobile Sheet Drag Handle */
+  #mobile-sheet-handle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 0 6px;
+    background: var(--basalt-900);
+    border-bottom: 1px solid var(--basalt-line);
+    cursor: pointer;
+    touch-action: none;
+  }
+  .handle-bar {
+    width: 42px;
+    height: 5px;
+    background: var(--basalt-line);
+    border-radius: 3px;
+  }
+
+  #sidebar-scroll {
+    overflow-y: auto;
+    flex: 1;
+    padding-bottom: 24px;
+    -webkit-overflow-scrolling: touch;
+  }
+  #sidebar-scroll::-webkit-scrollbar { width: 6px; }
+  #sidebar-scroll::-webkit-scrollbar-thumb { background: var(--basalt-line); border-radius: 3px; }
+
+  .brand {
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid var(--basalt-line);
+  }
+  .brand-eyebrow {
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--apricot);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .brand h1 {
+    font-size: 22px;
+    margin: 0;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .brand p {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--fog);
+    line-height: 1.5;
+  }
+  .clock-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--fog);
+  }
+  .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--leaf);
+    box-shadow: 0 0 0 0 rgba(52,199,123,.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(52,199,123,.55); }
+    70%  { box-shadow: 0 0 0 6px rgba(52,199,123,0); }
+    100% { box-shadow: 0 0 0 0 rgba(52,199,123,0); }
+  }
+
+  .section {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--basalt-line);
+  }
+  .section-title {
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--fog);
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* Destination picker */
+  #destination-hint {
+    font-size: 13px;
+    color: var(--fog);
+    background: var(--basalt-800);
+    border: 1px dashed var(--basalt-line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+  #destination-hint b { color: var(--paper); }
+
+  .preset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .preset-btn {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 12px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    min-height: 44px;
+    transition: border-color .15s, background .15s;
+    touch-action: manipulation;
+  }
+  .preset-btn:hover, .preset-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
+
+  #destination-active {
+    display: none;
+    margin-top: 12px;
+    background: rgba(245,165,54,.09);
+    border: 1px solid var(--apricot-dim);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  #destination-active .coord {
+    font-family: 'Space Grotesk', sans-serif;
+    color: var(--apricot);
+    font-size: 12px;
+  }
+  #clear-destination {
+    background: none; border: none; color: var(--fog);
+    font-size: 12px; text-decoration: underline; cursor: pointer;
+    padding: 8px 0; margin-top: 4px;
+    touch-action: manipulation;
+  }
+
+  /* Recommendations */
+  .rec-card {
+    display: flex;
+    gap: 12px;
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    align-items: center;
+  }
+  .rec-rank {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--basalt-950);
+    background: var(--apricot);
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .gauge {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .gauge-inner {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--basalt-800);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .rec-body { flex: 1; min-width: 0; }
+  .rec-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .rec-meta {
+    font-size: 11.5px;
+    color: var(--fog);
+    margin-top: 3px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .pill-free   { background: rgba(52,199,123,.15); color: var(--leaf); }
+  .pill-paid   { background: rgba(226,87,76,.15); color: var(--alert); }
+  .pill-lot    { background: rgba(77,143,240,.15); color: var(--sapphire); }
+  .pill-unavailable { background: rgba(243,156,18,.15); color: var(--unavailable); }
+  .pill-unspecified { background: rgba(148,152,166,.15); color: var(--fog); }
+
+  #rec-empty {
+    font-size: 13px;
+    color: var(--fog);
+    text-align: center;
+    padding: 18px 8px;
+    line-height: 1.6;
+  }
+
+  /* Traffic cards */
+  .traffic-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--basalt-line);
+    font-size: 13px;
+  }
+  .traffic-card:last-child { border-bottom: none; }
+  .traffic-name { color: var(--paper); font-weight: 500; }
+  .traffic-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .badge-Low    { background: rgba(52,199,123,.15); color: var(--leaf); }
+  .badge-Medium { background: rgba(245,165,54,.15); color: var(--apricot); }
+  .badge-Heavy  { background: rgba(226,87,76,.15); color: var(--alert); }
+
+  .overall-banner {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .overall-banner .big {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+  }
+
+  /* ---------------- Map ---------------- */
+  #map-wrap { position: relative; width: 100%; height: 100%; }
+  #map { height: 100%; width: 100%; background: var(--basalt-950); }
+
+  .leaflet-tile-pane { filter: saturate(0.85) brightness(0.95); }
+
+  #legend {
+    position: absolute;
+    bottom: 24px; left: 20px;
+    z-index: 500;
+    background: rgba(27,29,36,.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 12.5px;
+    width: 220px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  #legend h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--fog);
+  }
+  .legend-row { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+  .legend-row:last-child { margin-bottom: 0; }
+  .swatch { width: 16px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  #hint-banner {
+    position: absolute;
+    top: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 500;
+    background: rgba(27,29,36,.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 999px;
+    padding: 9px 18px;
+    font-size: 12.5px;
+    color: var(--paper);
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    transition: opacity .2s;
+    pointer-events: none;
+    max-width: 90vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #hint-banner .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--apricot); flex-shrink: 0; }
+
+  .rec-marker {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    width: 26px; height: 26px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 10px rgba(0,0,0,.4);
+    border: 2px solid var(--basalt-950);
+  }
+  .rec-marker span { transform: rotate(45deg); }
+
+  .dest-marker {
+    width: 18px; height: 18px;
+    background: var(--sapphire);
+    border: 3px solid var(--paper);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(77,143,240,.25);
+  }
+
+  /* Admin UI controls */
+  #admin-toggle-wrap {
+    position: absolute;
+    top: 20px; right: 20px;
+    z-index: 600;
+    display: flex;
+    gap: 8px;
+  }
+  .admin-btn {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    min-height: 44px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    transition: all .2s ease;
+    touch-action: manipulation;
+  }
+  .admin-btn:hover, .admin-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
+  
+  .admin-btn.active {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    border-color: var(--apricot);
+  }
+  
+  #ml-log-toggle { border-color: var(--leaf); color: var(--leaf); }
+  #ml-log-toggle:hover { background: rgba(52,199,123,.15); }
+  #ml-log-toggle.active { background: var(--leaf) !important; color: var(--basalt-950) !important; border-color: var(--leaf) !important; }
+
+  #admin-modal {
+    position: absolute;
+    top: 70px; right: 20px;
+    z-index: 1000;
+    background: rgba(27,29,36,.96);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--basalt-line);
+    padding: 18px;
+    border-radius: 14px;
+    width: 290px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #admin-modal.hidden { display: none; }
+  #admin-modal h3 {
+    margin: 0 0 14px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+    color: var(--paper);
+  }
+  .admin-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .admin-field label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--fog);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .admin-field input, .admin-field select {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    padding: 10px;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .admin-field input:focus, .admin-field select:focus {
+    outline: none;
+    border-color: var(--apricot);
+  }
+  .admin-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .btn-save {
+    flex: 1;
+    background: var(--apricot);
+    color: var(--basalt-950);
+    border: none;
+    font-weight: 700;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .btn-delete {
+    background: rgba(226,87,76,.18);
+    color: var(--alert);
+    border: 1px solid rgba(226,87,76,.3);
+    font-weight: 600;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .btn-cancel {
+    background: var(--basalt-800);
+    color: var(--fog);
+    border: 1px solid var(--basalt-line);
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  /* ---------------- Responsive / Mobile Adaptations ---------------- */
+  @media (max-width: 768px) {
+    #app {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr;
+    }
+
+    #sidebar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      width: 100%;
+      height: 60vh;
+      height: 60dvh;
+      border-right: none;
+      border-top: 1px solid var(--basalt-line);
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -8px 32px rgba(0,0,0,0.6);
+      z-index: 1000;
+      transform: translateY(0);
+    }
+
+    #sidebar.sheet-collapsed {
+      transform: translateY(calc(100% - 64px));
+    }
+
+    #mobile-sheet-handle {
+      display: flex;
+    }
+
+    .brand {
+      padding: 12px 18px 14px;
+    }
+    .brand h1 { font-size: 18px; }
+    .brand p { font-size: 12px; margin-top: 4px; }
+    .clock-row { margin-top: 6px; font-size: 11px; }
+
+    .section { padding: 14px 18px; }
+
+    #admin-toggle-wrap {
+      top: 12px; right: 12px;
+      flex-direction: column;
+    }
+    .admin-btn {
+      padding: 8px 14px;
+      font-size: 12px;
+      min-height: 38px;
+    }
+
+    #hint-banner {
+      top: 12px;
+      font-size: 11.5px;
+      padding: 7px 14px;
+    }
+
+    #legend {
+      bottom: 74px; left: 12px;
+      width: 180px;
+      padding: 10px 12px;
+      font-size: 11px;
+    }
+
+    #admin-modal {
+      position: fixed;
+      top: 50%; left: 50%; right: auto;
+      transform: translate(-50%, -50%);
+      width: 90vw;
+      max-width: 330px;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.8);
+    }
+
+    .leaflet-control-zoom {
+      margin-bottom: 70px !important;
+    }
+  }
+
+    /* Replace '.log-ml-button' with your button's exact class or id */
+    .log-ml-button {
+      position: absolute;
+      top: calc(15px + env(safe-area-inset-top));
+      left: calc(15px + env(safe-area-inset-left));
+    }
+
+</style>
+</head>
+<body>
+
+<div id="app">
+  <aside id="sidebar">
+    <div id="mobile-sheet-handle" onclick="toggleMobileSheet()">
+      <div class="handle-bar"></div>
+    </div>
+
+    <div class="brand">
+      <div class="brand-eyebrow">Kentron &middot; Yerevan</div>
+      <h1 class="display">Smart Parking Recommender</h1>
+      <p>Live-simulated curb & lot availability across central Yerevan, scored against real-time congestion.</p>
+      <div class="clock-row">
+        <span class="live-dot"></span>
+        <span id="clock">--:--:--</span>
+        <span style="color:var(--basalt-line)">&bull;</span>
+        <span id="data-source-tag">simulated feed</span>
+      </div>
+      <div class="clock-row" style="color:var(--paper); margin-top: 8px;">
+        <svg style="width:14px; height:14px; color:var(--apricot); margin-right:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+        <span id="weather-display" style="font-weight: 500;">--°C, --</span>
+      </div>
+    </div>
+
+    <div id="sidebar-scroll">
+
+      <div class="section">
+        <div class="section-title">Destination</div>
+        <div id="destination-hint">Click anywhere on the map to drop a pin, or jump to a landmark below.</div>
+        <div class="preset-grid" id="presets"></div>
+        <div id="destination-active">
+          <div>Destination set at</div>
+          <div class="coord" id="dest-coords">—</div>
+          <button id="clear-destination">Clear destination</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Top 3 Recommended Spots</div>
+        <div id="rec-list">
+          <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
+        </div>
+      </div>
+
+      <div class="section" style="border-bottom:none;">
+        <div class="overall-banner">
+          <div>
+            <div class="section-title" style="margin-bottom:2px;">Live Traffic &middot; Kentron</div>
+            <div style="font-size:11.5px;color:var(--fog);">by street, updated every 15s</div>
+          </div>
+          <div class="big" id="overall-level" style="color:var(--apricot)">—</div>
+        </div>
+        <div id="traffic-list"></div>
+      </div>
+
+    </div>
+  </aside>
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div id="hint-banner"><span class="dot"></span><span id="hint-text">Click the map to set a destination</span></div>
+    
+    <div id="admin-toggle-wrap">
+      <button id="ml-log-toggle" class="admin-btn">Log ML Parking</button>
+      <button id="admin-toggle" class="admin-btn">Admin / Curation Mode</button>
+    </div>
+
+    <!-- Admin Form Modal Overlay -->
+    <div id="admin-modal" class="hidden">
+      <h3 id="admin-modal-title">Edit Segment</h3>
+      <input type="hidden" id="edit-id" />
+      <input type="hidden" id="edit-geom-type" />
+      <input type="hidden" id="edit-coords" />
+
+      <div class="admin-field">
+        <label for="edit-name">Street / Facility Name</label>
+        <input type="text" id="edit-name" placeholder="e.g. Tumanyan Street" />
+      </div>
+
+      <div class="admin-field">
+        <label for="edit-type">Parking Category</label>
+        <select id="edit-type">
+          <option value="free">Free Curbside</option>
+          <option value="paid">Paid Curbside</option>
+          <option value="lot">Structure / Parking Lot</option>
+          <option value="unavailable">Unavailable / No Parking</option>
+          <option value="unspecified">Unspecified</option>
+        </select>
+      </div>
+
+      <div class="admin-actions">
+        <button class="btn-save" onclick="saveAdminFeature()">Save Segment</button>
+        <button class="btn-delete" id="btn-delete" onclick="deleteAdminFeature()">Delete</button>
+        <button class="btn-cancel" onclick="closeAdminModal()">Cancel</button>
+      </div>
+    </div>
+
+    <div id="legend">
+      <h3>Legend</h3>
+      <div class="legend-row"><span class="swatch" style="background:#e74c3c"></span> Paid parking (red lines)</div>
+      <div class="legend-row"><span class="swatch" style="background:#2ecc71"></span> Free curbside lanes</div>
+      <div class="legend-row"><span class="swatch" style="background:#3498db"></span> Dedicated parking lots</div>
+      <div class="legend-row"><span class="swatch" style="background:#f39c12"></span> Unavailable / No Parking</div>
+      <div class="legend-row"><span class="swatch" style="background:#7f8c8d"></span> Unspecified / general</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CENTER = [{{ center_lat }}, {{ center_lon }}];
+const TYPE_LABEL = { free: 'Free', paid: 'Paid', lot: 'Lot', unavailable: 'Unavailable', unspecified: 'Unspecified' };
+
+const PRESETS = [
+  { label: 'Republic Square', lat: 40.1772, lon: 44.5152 },
+  { label: 'Opera House', lat: 40.1848, lon: 44.5158 },
+  { label: 'Cascade Complex', lat: 40.1913, lon: 44.5133 },
+  { label: 'Vernissage Market', lat: 40.1808, lon: 44.5175 },
+];
+
+// ---------------- Mobile Bottom Sheet Toggle ----------------
+function toggleMobileSheet() {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('sheet-collapsed');
+}
+
+// Auto collapse bottom sheet on mobile screens when map is tapped
+if (window.innerWidth <= 768) {
+  document.getElementById('sidebar').classList.add('sheet-collapsed');
+}
+
+// ---------------- Map setup ----------------
+const map = L.map('map', { zoomControl: false, attributionControl: false }).setView(CENTER, 15);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+}).addTo(map);
+
+const parkingLayer = L.layerGroup().addTo(map);
+const recMarkersLayer = L.layerGroup().addTo(map);
+let destMarker = null;
+let destination = null; // { lat, lon }
+
+// Admin mode state
+let isAdmin = false;
+let isLoggingML = false;
+let activeAdminLayer = null;
+let activeAdminIsNew = false;
+
+// ---------------- Presets ----------------
+const presetsEl = document.getElementById('presets');
+PRESETS.forEach(p => {
+  const btn = document.createElement('button');
+  btn.className = 'preset-btn';
+  btn.textContent = p.label;
+  btn.onclick = () => {
+    setDestination(p.lat, p.lon);
+    if (window.innerWidth <= 768) {
+      document.getElementById('sidebar').classList.remove('sheet-collapsed');
+    }
+  };
+  presetsEl.appendChild(btn);
+});
+
+document.getElementById('clear-destination').onclick = () => {
+  destination = null;
+  document.getElementById('destination-active').style.display = 'none';
+  document.getElementById('hint-banner').style.display = 'flex';
+  if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+  recMarkersLayer.clearLayers();
+  document.getElementById('rec-list').innerHTML =
+    '<div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>';
+};
+
+map.on('click', async (e) => {
+  if (isLoggingML) {
+    const lat = e.latlng.lat;
+    const lon = e.latlng.lng;
+    
+    // Quick visual feedback marker
+    const successMarker = L.circleMarker([lat, lon], {
+        color: 'var(--leaf)', fillColor: 'var(--leaf)', fillOpacity: 1, radius: 8
+    }).addTo(map);
+    setTimeout(() => map.removeLayer(successMarker), 2500);
+
+    // Send successful parking spot point to training file
+    await fetch('/api/admin/ml_feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lon })
+    });
+    
+    document.getElementById('ml-log-toggle').click(); // toggle off state
+    alert("Successfully recorded parking location for ML training algorithm!");
+    return;
+  }
+  
+  if (isAdmin) return; // Do not place destination pin when drafting segments in admin mode
+  setDestination(e.latlng.lat, e.latlng.lng);
+});
+
+function setDestination(lat, lon) {
+  destination = { lat, lon };
+  document.getElementById('hint-banner').style.display = 'none';
+  document.getElementById('destination-active').style.display = 'block';
+  document.getElementById('dest-coords').textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+
+  if (destMarker) map.removeLayer(destMarker);
+  destMarker = L.marker([lat, lon], {
+    icon: L.divIcon({ className: '', html: '<div class="dest-marker"></div>', iconSize: [18, 18] })
+  }).addTo(map);
+
+  map.panTo([lat, lon]);
+  fetchRecommendations(lat, lon);
+}
+
+// ---------------- Parking layer ----------------
+async function loadParking() {
+  const res = await fetch('/api/parking');
+  const data = await res.json();
+  parkingLayer.clearLayers();
+
+  data.features.forEach(f => {
+    const props = f.properties;
+    const popup = `
+      <div style="font-family:Inter,sans-serif;min-width:180px;">
+        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13.5px;margin-bottom:4px;">${props.name}</div>
+        <div style="font-size:12px;color:#555;margin-bottom:6px;text-transform:uppercase;letter-spacing:.03em;">${TYPE_LABEL[props.parking_type] || props.parking_type} parking</div>
+        <div style="font-size:12.5px;line-height:1.6;">
+          Status: <b>${props.occupancy_status}</b><br/>
+          Availability: <b>${props.availability_pct}%</b><br/>
+          Traffic: <b>${props.traffic_level}</b>
+        </div>
+      </div>`;
+
+    let layer;
+    if (f.geometry.type === 'LineString') {
+      const latlngs = f.geometry.coordinates.map(c => [c[1], c[0]]);
+      const opacity = props.parking_type === 'unavailable' ? 0.35 : (0.45 + (props.availability_pct / 100) * 0.5);
+      layer = L.polyline(latlngs, { color: props.color, weight: 6, opacity });
+    } else if (f.geometry.type === 'Polygon') {
+      const latlngs = f.geometry.coordinates[0].map(c => [c[1], c[0]]);
+      layer = L.polygon(latlngs, { color: '#2980b9', fillColor: props.color, fillOpacity: 0.4, weight: 2 });
+    }
+
+    if (layer) {
+      if (isAdmin) {
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          openAdminModal(layer, props, f.geometry.type, f.geometry.coordinates);
+        });
+      } else {
+        layer.bindPopup(popup);
+      }
+      layer.addTo(parkingLayer);
+    }
+  });
+}
+
+// ---------------- Recommendations ----------------
+function gaugeStyle(pct, color) {
+  return `background: conic-gradient(${color} ${pct * 3.6}deg, var(--basalt-700) 0deg);`;
+}
+
+async function fetchRecommendations(lat, lon) {
+  const res = await fetch(`/api/recommend?lat=${lat}&lon=${lon}&radius=500`);
+  const data = await res.json();
+  const listEl = document.getElementById('rec-list');
+  recMarkersLayer.clearLayers();
+
+  if (!data.recommendations || data.recommendations.length === 0) {
+    listEl.innerHTML = '<div id="rec-empty">No parking segments found within 500&nbsp;m of this point. Try clicking closer to a mapped street.</div>';
+    return;
+  }
+
+  listEl.innerHTML = '';
+  data.recommendations.forEach((r, i) => {
+    const color = r.color;
+    const card = document.createElement('div');
+    card.className = 'rec-card';
+    card.innerHTML = `
+      <div class="rec-rank">${i + 1}</div>
+      <div class="gauge" style="${gaugeStyle(r.availability_pct, color)}">
+        <div class="gauge-inner">${Math.round(r.availability_pct)}%</div>
+      </div>
+      <div class="rec-body">
+        <div class="rec-name">${r.name}</div>
+        <div class="rec-meta">
+          <span class="pill pill-${r.parking_type}">${TYPE_LABEL[r.parking_type]}</span>
+          <span>${r.distance_m} m &middot; ${r.walk_time_min} min walk</span>
+        </div>
+        <div class="rec-meta">
+          <span>Score ${r.score}</span>
+          <span style="color:var(--fog)">&bull;</span>
+          <span>${r.occupancy_status}</span>
+        </div>
+      </div>
+    `;
+    listEl.appendChild(card);
+
+    const marker = L.marker([r.location.lat, r.location.lon], {
+      icon: L.divIcon({ className: '', html: `<div class="rec-marker"><span>${i + 1}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 26] })
+    });
+    marker.bindPopup(`<b>#${i + 1} &middot; ${r.name}</b><br/>Score ${r.score} &middot; ${r.availability_pct}% open`);
+    marker.addTo(recMarkersLayer);
+  });
+}
+
+// ---------------- Traffic & Weather panel ----------------
+async function loadTraffic() {
+  const res = await fetch('/api/traffic');
+  const data = await res.json();
+
+  const overallEl = document.getElementById('overall-level');
+  overallEl.textContent = data.overall_level;
+  overallEl.style.color = data.overall_level === 'Low' ? 'var(--leaf)'
+    : data.overall_level === 'Medium' ? 'var(--apricot)' : 'var(--alert)';
+
+  const listEl = document.getElementById('traffic-list');
+  listEl.innerHTML = '';
+  data.streets.slice(0, 8).forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'traffic-card';
+    row.innerHTML = `
+      <span class="traffic-name">${s.name}</span>
+      <span class="traffic-badge badge-${s.traffic_level}">${s.traffic_level}</span>
+    `;
+    listEl.appendChild(row);
+  });
+}
+
+async function loadWeather() {
+  try {
+    const res = await fetch('/api/weather');
+    const data = await res.json();
+    document.getElementById('weather-display').textContent = `${data.temp_c}°C, ${data.condition}`;
+  } catch (err) {
+    console.error("Failed to load weather", err);
+  }
+}
+loadWeather();
+setInterval(loadWeather, 600000); // refresh every 10 mins
+
+// ---------------- Clock ----------------
+function tickClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ---------------- Admin / Curation Mode & ML Logging ----------------
+
+document.getElementById('ml-log-toggle').onclick = () => {
+  isLoggingML = !isLoggingML;
+  const btn = document.getElementById('ml-log-toggle');
+  const hintText = document.getElementById('hint-text');
+
+  if (isLoggingML) {
+    btn.textContent = "Click map to log spot...";
+    btn.classList.add('active');
+    hintText.textContent = "ML Log Mode: Click on the map where you found a parking spot";
+    document.getElementById('hint-banner').style.display = 'flex';
+    
+    // Automatically turn off standard Admin Mode if it's currently on
+    if (isAdmin) document.getElementById('admin-toggle').click();
+  } else {
+    btn.textContent = "Log ML Parking";
+    btn.classList.remove('active');
+    hintText.textContent = destination ? "" : "Click the map to set a destination";
+    if(destination) document.getElementById('hint-banner').style.display = 'none';
+  }
+};
+
+document.getElementById('admin-toggle').onclick = () => {
+  isAdmin = !isAdmin;
+  const btn = document.getElementById('admin-toggle');
+  const hintText = document.getElementById('hint-text');
+
+  if (isAdmin) {
+    btn.textContent = "Exit Admin Mode";
+    btn.classList.add('active');
+    hintText.textContent = "Admin Mode: Click segment to edit, or draw new shape";
+    document.getElementById('hint-banner').style.display = 'flex';
+    
+    // Automatically turn off ML Logging Mode if it's currently on
+    if (isLoggingML) document.getElementById('ml-log-toggle').click();
+    
+    // Enable Leaflet Geoman Toolbar
+    map.pm.addControls({
+      position: 'topleft',
+      drawMarker: false,
+      drawCircleMarker: false,
+      drawCircle: false,
+      drawPolyline: true,
+      drawRectangle: true,
+      drawPolygon: true,
+      editMode: true,
+      dragMode: true,
+      cutPolygon: false,
+      removalMode: false,
+    });
+  } else {
+    btn.textContent = "Admin / Curation Mode";
+    btn.classList.remove('active');
+    hintText.textContent = destination ? "" : "Click the map to set a destination";
+    if(destination) document.getElementById('hint-banner').style.display = 'none';
+    map.pm.removeControls();
+    closeAdminModal();
+  }
+  loadParking(); // Re-render layers with correct click handlers
+};
+
+// Listen for newly drawn shapes via Leaflet-Geoman
+map.on('pm:create', e => {
+  if (!isAdmin) return;
+  openAdminModal(e.layer, null, e.shape === 'Line' ? 'LineString' : 'Polygon');
+});
+
+function openAdminModal(layer, props = null, geomTypeOverride = null, existingCoords = null) {
+  let geomType = geomTypeOverride;
+  let coords = existingCoords;
+
+  if (!coords) {
+    if (layer instanceof L.Polygon) {
+      geomType = 'Polygon';
+      let latlngs = layer.getLatLngs()[0];
+      coords = [latlngs.map(ll => [ll.lng, ll.lat])];
+      if (coords[0].length > 0) coords[0].push(coords[0][0]); // close polygon loop
+    } else {
+      geomType = 'LineString';
+      coords = layer.getLatLngs().map(ll => [ll.lng, ll.lat]);
+    }
+  }
+
+  document.getElementById('edit-id').value = props ? props.id : Math.random().toString(36).substring(2, 12);
+  document.getElementById('edit-name').value = props ? props.name : '';
+  document.getElementById('edit-type').value = props ? props.parking_type : 'free';
+  document.getElementById('edit-geom-type').value = geomType;
+  document.getElementById('edit-coords').value = JSON.stringify(coords);
+
+  document.getElementById('admin-modal-title').textContent = props ? 'Edit Parking Segment' : 'New Parking Segment';
+  document.getElementById('btn-delete').style.display = props ? 'inline-block' : 'none';
+  document.getElementById('admin-modal').classList.remove('hidden');
+
+  activeAdminLayer = layer;
+  activeAdminIsNew = !props;
+}
+
+function closeAdminModal() {
+  document.getElementById('admin-modal').classList.add('hidden');
+  if (activeAdminIsNew && activeAdminLayer) {
+    map.removeLayer(activeAdminLayer);
+  }
+  activeAdminLayer = null;
+}
+
+async function saveAdminFeature() {
+  const coords = JSON.parse(document.getElementById('edit-coords').value);
+  let center = [40.1792, 44.5152];
+
+  if (activeAdminLayer) {
+    const bounds = activeAdminLayer.getBounds();
+    const c = bounds.getCenter();
+    center = [c.lng, c.lat];
+  } else if (coords.length > 0) {
+    const firstCoord = Array.isArray(coords[0][0]) ? coords[0][0] : coords[0];
+    center = [firstCoord[0], firstCoord[1]];
+  }
+
+  const payload = {
+    id: document.getElementById('edit-id').value,
+    name: document.getElementById('edit-name').value || "Unnamed segment",
+    parking_type: document.getElementById('edit-type').value,
+    geometry_type: document.getElementById('edit-geom-type').value,
+    coordinates: coords,
+    centroid: center
+  };
+
+  await fetch('/api/admin/feature', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  closeAdminModal();
+  refreshAll();
+}
+
+async function deleteAdminFeature() {
+  const id = document.getElementById('edit-id').value;
+  if (!id) return;
+
+  await fetch(`/api/admin/feature/${id}`, { method: 'DELETE' });
+  closeAdminModal();
+  refreshAll();
+}
+
+// ---------------- Refresh cycle ----------------
+function refreshAll() {
+  loadParking();
+  loadTraffic();
+  if (destination) fetchRecommendations(destination.lat, destination.lon);
+}
+refreshAll();
+setInterval(refreshAll, 15000);
+
+// ---------------- Service Worker Registration (PWA) ----------------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('[PWA] Service Worker registered:', reg.scope))
+      .catch(err => console.error('[PWA] Service Worker registration failed:', err));
+  });
+}
+</script>
+
+</body>
+</html>

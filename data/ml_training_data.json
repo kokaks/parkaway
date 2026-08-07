@@ -1,0 +1,22 @@
+[
+  {
+    "timestamp": "2026-07-28T13:09:24.075216",
+    "lat": 40.194962500590854,
+    "lon": 44.50881242752075,
+    "weather_temp_c": 32.1,
+    "weather_condition": "Clear",
+    "traffic_multiplier": 1.0,
+    "hour_of_day": 13,
+    "day_of_week": 1
+  },
+  {
+    "timestamp": "2026-07-30T00:17:09.261315",
+    "lat": 40.186574142247515,
+    "lon": 44.51268285512925,
+    "weather_temp_c": 25.6,
+    "weather_condition": "Cloudy",
+    "traffic_multiplier": 1.0,
+    "hour_of_day": 0,
+    "day_of_week": 3
+  }
+]

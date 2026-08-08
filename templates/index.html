@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#14151a" />
 <title>Yerevan Smart Parking</title>
@@ -36,6 +35,12 @@
     --alert: #e2574c;
     --sapphire: #4d8ff0;
     --unavailable: #f39c12;
+    
+    /* Device Safe Area insets to avoid notches, islands, and rounded corners */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
   }
 
   * { 
@@ -336,13 +341,31 @@
 
   .leaflet-tile-pane { filter: saturate(0.85) brightness(0.95); }
 
-  /* Floating Search Bar */
-  #search-bar-wrap {
+  /* ---------------- Top UI Overlays ---------------- */
+  
+  /* Container for top UI elements to structurally prevent overlapping */
+  .top-ui-container {
     position: absolute;
-    top: calc(16px + env(safe-area-inset-top));
-    left: calc(20px + env(safe-area-inset-left));
+    top: calc(16px + var(--safe-top));
+    left: calc(20px + var(--safe-left));
+    right: calc(20px + var(--safe-right));
     z-index: 750;
-    width: calc(100% - 40px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    display: flex;
+    flex-direction: row; /* Desktop layout side-by-side */
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none; /* Let clicks pass through empty space */
+    gap: 12px;
+  }
+  
+  .top-ui-container > * {
+    pointer-events: auto; /* Re-enable clicks on the actual UI components */
+  }
+
+  /* Search Bar Wrapper */
+  #search-bar-wrap {
+    position: relative;
+    width: 100%;
     max-width: 420px;
   }
 
@@ -380,7 +403,7 @@
     outline: none;
     color: var(--paper);
     font-family: 'Inter', sans-serif;
-    font-size: 14px;
+    font-size: 16px; /* 16px prevents iOS auto-zoom */
     height: 100%;
   }
 
@@ -414,7 +437,7 @@
     border: 1px solid var(--basalt-line);
     border-radius: 12px;
     margin-top: 6px;
-    max-height: 280px;
+    max-height: 40vh; /* Responsive height to avoid pushing too far */
     overflow-y: auto;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
     -webkit-overflow-scrolling: touch;
@@ -460,10 +483,58 @@
     text-align: center;
   }
 
+  /* Admin Buttons Wrapper */
+  #admin-toggle-wrap {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  
+  .admin-btn {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    min-height: 44px; /* Essential touch target size */
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    transition: all .2s ease;
+    touch-action: manipulation;
+  }
+  .admin-btn:hover, .admin-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
+  
+  .admin-btn.active {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    border-color: var(--apricot);
+  }
+  
+  #ml-log-toggle { border-color: var(--leaf); color: var(--leaf); }
+  #ml-log-toggle:hover { background: rgba(52,199,123,.15); }
+  #ml-log-toggle.active { background: var(--leaf) !important; color: var(--basalt-950) !important; border-color: var(--leaf) !important; }
+
+  /* Adjust native Leaflet Controls to respect safe areas */
+  .leaflet-control-container .leaflet-top {
+    top: calc(var(--safe-top) + 80px); /* Pushes down to clear custom top UI */
+  }
+  .leaflet-control-container .leaflet-right {
+    right: var(--safe-right);
+  }
+  .leaflet-control-container .leaflet-bottom {
+    bottom: var(--safe-bottom);
+  }
+  .leaflet-control-container .leaflet-left {
+    left: var(--safe-left);
+  }
+
   #legend {
     position: absolute;
-    bottom: calc(24px + env(safe-area-inset-bottom));
-    left: calc(20px + env(safe-area-inset-left));
+    bottom: calc(24px + var(--safe-bottom));
+    left: calc(20px + var(--safe-left));
     z-index: 500;
     background: rgba(27,29,36,.92);
     backdrop-filter: blur(8px);
@@ -489,7 +560,7 @@
 
   #hint-banner {
     position: absolute;
-    top: calc(76px + env(safe-area-inset-top));
+    top: calc(76px + var(--safe-top));
     left: 50%; transform: translateX(-50%);
     z-index: 500;
     background: rgba(27,29,36,.92);
@@ -533,46 +604,10 @@
     box-shadow: 0 0 0 4px rgba(77,143,240,.25);
   }
 
-  /* Admin UI controls */
-  #admin-toggle-wrap {
-    position: absolute;
-    top: calc(16px + env(safe-area-inset-top));
-    right: calc(20px + env(safe-area-inset-right));
-    z-index: 750;
-    display: flex;
-    gap: 8px;
-  }
-  .admin-btn {
-    background: var(--basalt-800);
-    border: 1px solid var(--basalt-line);
-    color: var(--paper);
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 700;
-    font-size: 13px;
-    padding: 10px 16px;
-    border-radius: 999px;
-    cursor: pointer;
-    min-height: 44px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    transition: all .2s ease;
-    touch-action: manipulation;
-  }
-  .admin-btn:hover, .admin-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
-  
-  .admin-btn.active {
-    background: var(--apricot);
-    color: var(--basalt-950);
-    border-color: var(--apricot);
-  }
-  
-  #ml-log-toggle { border-color: var(--leaf); color: var(--leaf); }
-  #ml-log-toggle:hover { background: rgba(52,199,123,.15); }
-  #ml-log-toggle.active { background: var(--leaf) !important; color: var(--basalt-950) !important; border-color: var(--leaf) !important; }
-
   #admin-modal {
     position: absolute;
-    top: calc(75px + env(safe-area-inset-top));
-    right: calc(20px + env(safe-area-inset-right));
+    top: calc(75px + var(--safe-top));
+    right: calc(20px + var(--safe-right));
     z-index: 1000;
     background: rgba(27,29,36,.96);
     backdrop-filter: blur(12px);
@@ -621,11 +656,8 @@
     gap: 8px;
     margin-top: 16px;
   }
-  .btn-save {
+  .btn-save, .btn-delete, .btn-cancel {
     flex: 1;
-    background: var(--apricot);
-    color: var(--basalt-950);
-    border: none;
     font-weight: 700;
     padding: 10px;
     border-radius: 8px;
@@ -634,28 +666,21 @@
     min-height: 44px;
     touch-action: manipulation;
   }
+  .btn-save {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    border: none;
+  }
   .btn-delete {
     background: rgba(226,87,76,.18);
     color: var(--alert);
     border: 1px solid rgba(226,87,76,.3);
-    font-weight: 600;
-    padding: 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 13px;
-    min-height: 44px;
-    touch-action: manipulation;
   }
   .btn-cancel {
     background: var(--basalt-800);
     color: var(--fog);
     border: 1px solid var(--basalt-line);
-    padding: 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 13px;
-    min-height: 44px;
-    touch-action: manipulation;
+    font-weight: 600;
   }
 
   /* ---------------- Responsive / Mobile Adaptations ---------------- */
@@ -677,11 +702,11 @@
       box-shadow: 0 -8px 32px rgba(0,0,0,0.6);
       z-index: 1000;
       transform: translateY(0);
-      padding-bottom: env(safe-area-inset-bottom);
+      padding-bottom: var(--safe-bottom);
     }
 
     #sidebar.sheet-collapsed {
-      transform: translateY(calc(100% - 64px));
+      transform: translateY(calc(100% - 64px - var(--safe-bottom)));
     }
 
     #mobile-sheet-handle {
@@ -697,33 +722,44 @@
 
     .section { padding: 14px 18px; }
 
+    /* Grouping fixes overlap: on mobile stack elements vertically */
+    .top-ui-container {
+      top: calc(10px + var(--safe-top));
+      left: calc(12px + var(--safe-left));
+      right: calc(12px + var(--safe-right));
+      flex-direction: column;
+    }
+
     #search-bar-wrap {
-      top: calc(10px + env(safe-area-inset-top));
-      left: calc(12px + env(safe-area-inset-left));
-      width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+      width: 100%;
       max-width: none;
     }
 
     #admin-toggle-wrap {
-      top: calc(66px + env(safe-area-inset-top));
-      right: calc(12px + env(safe-area-inset-right));
-      flex-direction: row;
+      width: 100%;
+      flex-wrap: wrap; /* Wraps buttons nicely if screen is too narrow */
     }
+    
     .admin-btn {
-      padding: 8px 14px;
-      font-size: 12px;
-      min-height: 38px;
+      padding: 10px 14px; /* Ensure sufficient touch height */
+      font-size: 13px;
+      min-height: 44px; /* Minimum Apple HIG recommendation */
+      flex: 1; /* Stretch on smaller screens for easier tapping */
+    }
+
+    .leaflet-control-container .leaflet-top {
+      top: calc(var(--safe-top) + 130px); /* Clear stacked elements safely */
     }
 
     #hint-banner {
-      top: calc(116px + env(safe-area-inset-top));
+      top: calc(130px + var(--safe-top));
       font-size: 11px;
       padding: 6px 12px;
     }
 
     #legend {
-      bottom: calc(74px + env(safe-area-inset-bottom));
-      left: calc(12px + env(safe-area-inset-left));
+      bottom: calc(74px + var(--safe-bottom));
+      left: calc(12px + var(--safe-left));
       width: 180px;
       padding: 10px 12px;
       font-size: 11px;
@@ -803,27 +839,34 @@
   </aside>
 
   <div id="map-wrap">
-    <!-- Floating Address Search Bar -->
-    <div id="search-bar-wrap">
-      <div class="search-input-box">
-        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input type="text" id="search-input" placeholder="Search address, e.g. Mashtots 23/6..." autocomplete="off" spellcheck="false" />
-        <button id="search-clear-btn" class="search-clear-btn hidden" onclick="clearSearchInput()">&times;</button>
+    
+    <!-- Top UI Container preventing independent overlaps -->
+    <div class="top-ui-container">
+      
+      <!-- Floating Address Search Bar -->
+      <div id="search-bar-wrap">
+        <div class="search-input-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="search-input" placeholder="Search address, e.g. Mashtots 23/6..." autocomplete="off" spellcheck="false" />
+          <button id="search-clear-btn" class="search-clear-btn hidden" onclick="clearSearchInput()">&times;</button>
+        </div>
+        <div id="search-dropdown" class="search-dropdown hidden"></div>
       </div>
-      <div id="search-dropdown" class="search-dropdown hidden"></div>
+
+      <!-- Action Buttons -->
+      <div id="admin-toggle-wrap">
+        <button id="ml-log-toggle" class="admin-btn" onclick="logMLFeedback()">Log ML Parking</button>
+        <button id="admin-toggle" class="admin-btn" onclick="toggleAdminMode()">Admin / Curation Mode</button>
+      </div>
+
     </div>
 
     <div id="map"></div>
     <div id="hint-banner"><span class="dot"></span><span id="hint-text">Search address or click map to set destination</span></div>
     
-    <div id="admin-toggle-wrap">
-      <button id="ml-log-toggle" class="admin-btn" onclick="logMLFeedback()">Log ML Parking</button>
-      <button id="admin-toggle" class="admin-btn" onclick="toggleAdminMode()">Admin / Curation Mode</button>
-    </div>
-
     <!-- Admin Form Modal Overlay -->
     <div id="admin-modal" class="hidden">
       <h3 id="admin-modal-title">Edit Segment</h3>

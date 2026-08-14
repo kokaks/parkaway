@@ -26,6 +26,7 @@ Then open http://127.0.0.1:5000
 
 from __future__ import annotations
 
+from flask_sqlalchemy import SQLAlchemy
 import hashlib
 import json
 import math
@@ -108,7 +109,20 @@ YEREVAN_STREET_SYNONYMS = {
 }
 
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db').replace("postgres://", "postgresql://", 1)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
 
+# Define the Database Model for your ML Data
+class MLFeedback(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    lat = db.Column(db.Float, nullable=False)
+    lon = db.Column(db.Float, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+# Create the tables automatically
+with app.app_context():
+    db.create_all()
 
 # --------------------------------------------------------------------------
 # Contextual Factor 1: Destination POI Busyness Model & Data
@@ -1189,35 +1203,20 @@ def api_admin_save_feature():
     })
 
 
-@app.route("/api/admin/ml_feedback", methods=["POST"])
-def api_admin_ml_feedback():
-    data = request.json or {}
-    now = datetime.now()
-    weather = fetch_live_weather()
-    traffic = fetch_live_traffic_multiplier()
-
-    record = {
-        "timestamp": now.isoformat(),
-        "lat": data.get("lat"),
-        "lon": data.get("lon"),
-        "weather_temp_c": weather.get("temp_c"),
-        "weather_condition": weather.get("condition"),
-        "traffic_multiplier": traffic,
-        "hour_of_day": now.hour,
-        "day_of_week": now.weekday()
-    }
-
-    records = []
-    if ML_DATA_FILE.exists():
-        try:
-            records = json.loads(ML_DATA_FILE.read_text())
-        except Exception:
-            pass
-
-    records.append(record)
-    ML_DATA_FILE.write_text(json.dumps(records, indent=2, ensure_ascii=False))
-
-    return jsonify({"status": "ok", "recorded": True})
+@app.route('/api/admin/ml_feedback', methods=['POST'])
+def log_ml_feedback():
+    data = request.get_json()
+    
+    # Validate data
+    if not data or 'lat' not in data or 'lon' not in data:
+        return jsonify({"error": "Missing location data"}), 400
+    
+    # Save globally to the SQL database
+    new_entry = MLFeedback(lat=data['lat'], lon=data['lon'])
+    db.session.add(new_entry)
+    db.session.commit()
+    
+    return jsonify({"status": "success"})
 
 
 if __name__ == "__main__":

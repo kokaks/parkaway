@@ -1,3 +1,5 @@
 Flask>=3.0.0
 osmnx>=1.9.0
 gunicorn 
+Flask-SQLAlchemy==3.1.1
+psycopg2-binary==2.9.9

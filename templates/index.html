@@ -604,6 +604,34 @@
     box-shadow: 0 0 0 4px rgba(77,143,240,.25);
   }
 
+  /* Live GPS user-location marker (distinct from the destination pin) */
+  .user-marker-wrap { position: relative; }
+  .user-location-marker {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px; height: 16px;
+    background: var(--leaf);
+    border: 3px solid var(--paper);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(52,199,123,.25);
+    z-index: 2;
+  }
+  .user-location-pulse {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px; height: 16px;
+    background: rgba(52,199,123,.45);
+    border-radius: 50%;
+    animation: user-pulse 2.2s infinite;
+    z-index: 1;
+  }
+  @keyframes user-pulse {
+    0%   { transform: translate(-50%, -50%) scale(1); opacity: .8; }
+    100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+  }
+
   #admin-modal {
     position: absolute;
     top: calc(75px + var(--safe-top));
@@ -927,6 +955,13 @@ let currentDest = null;
 let isAdminMode = false;
 let searchDebounceTimer = null;
 
+// Live GPS state
+let userMarker = null;
+let userLat = null;
+let userLon = null;
+let geoWatchId = null;
+let hasCenteredOnUser = false;
+
 // Helper function to escape HTML string attributes safely
 function escapeHtml(str) {
   if (!str) return '';
@@ -945,6 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchWeather();
   fetchTraffic();
   initSearchInput();
+  initGeolocation();
   setInterval(fetchTraffic, 15000);
   setInterval(fetchWeather, 60000);
 });
@@ -975,6 +1011,64 @@ function initMap() {
     if (isAdminMode) return;
     setDestination(e.latlng.lat, e.latlng.lng, `Custom Pin (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`);
   });
+}
+
+// --------------------------------------------------------------------------
+// Live GPS Location (requests permission once, then tracks continuously
+// while the app is open; independent of the destination pin so searching
+// for / clicking a destination never moves or clears the user's live dot)
+// --------------------------------------------------------------------------
+
+function initGeolocation() {
+  if (!('geolocation' in navigator)) {
+    console.warn('Geolocation is not supported in this browser.');
+    return;
+  }
+  // First request triggers the one-time browser permission prompt.
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      updateUserLocation(pos);
+      startWatchingLocation();
+    },
+    (err) => {
+      console.warn('Geolocation permission denied or unavailable:', err.message);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+}
+
+function startWatchingLocation() {
+  if (geoWatchId !== null) return;
+  geoWatchId = navigator.geolocation.watchPosition(
+    updateUserLocation,
+    (err) => console.warn('Geolocation watch error:', err.message),
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+  );
+}
+
+function updateUserLocation(pos) {
+  userLat = pos.coords.latitude;
+  userLon = pos.coords.longitude;
+
+  if (userMarker) {
+    userMarker.setLatLng([userLat, userLon]);
+  } else {
+    const userIcon = L.divIcon({
+      className: 'user-marker-wrap',
+      html: '<div class="user-location-pulse"></div><div class="user-location-marker"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+    userMarker = L.marker([userLat, userLon], { icon: userIcon, zIndexOffset: 400 }).addTo(map);
+    userMarker.bindPopup('<div style="font-family:\'Inter\',sans-serif; color:#14151a;"><strong>Your location</strong></div>');
+  }
+
+  // Only auto-center the map on the very first GPS fix, so the user can
+  // freely pan/search afterwards without the map jumping back to them.
+  if (!hasCenteredOnUser) {
+    hasCenteredOnUser = true;
+    map.setView([userLat, userLon], 16);
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -1287,18 +1381,31 @@ function toggleAdminMode() {
 }
 
 function logMLFeedback() {
-  if (!currentDest) {
-    alert('Please set a destination or search an address first to log parking feedback!');
+  if (userLat === null || userLon === null) {
+    alert('Please allow location access so we can log your GPS position as the parking spot!');
     return;
   }
+
+  const payload = { lat: userLat, lon: userLon };
+  if (currentDest) {
+    payload.dest_lat = currentDest.lat;
+    payload.dest_lon = currentDest.lon;
+  }
+
   fetch('/api/admin/ml_feedback', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lat: currentDest.lat, lon: currentDest.lon })
+    body: JSON.stringify(payload)
   })
   .then(r => r.json())
-  .then(() => {
-    alert('Parking location successfully recorded for ML model training!');
+  .then((res) => {
+    let matchMsg = '';
+    if (res.parked_at_recommended_spot === true) {
+      matchMsg = ' You parked at one of the recommended spots!';
+    } else if (res.parked_at_recommended_spot === false) {
+      matchMsg = ' You parked somewhere other than the recommended spots.';
+    }
+    alert('Parking location successfully recorded for ML model training!' + matchMsg);
   });
 }
 

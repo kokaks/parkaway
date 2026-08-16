@@ -1386,35 +1386,45 @@ async function logMLFeedback() {
 
   // Helper function to transmit payload to Flask backend
   async function sendMLData(lat, lon) {
+  try {
+    const payload = {
+      lat: parseFloat(lat),
+      lon: parseFloat(lon),
+      dest_lat: window.currentDestination ? window.currentDestination.lat : null,
+      dest_lon: window.currentDestination ? window.currentDestination.lon : null
+    };
+
+    const response = await fetch('/api/admin/ml_feedback', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    // 1. Fetch raw text first to handle non-JSON HTML server responses safely
+    const rawText = await response.text();
+    let resData;
+
     try {
-      const payload = {
-        lat: parseFloat(lat),
-        lon: parseFloat(lon),
-        dest_lat: window.currentDestination ? window.currentDestination.lat : null,
-        dest_lon: window.currentDestination ? window.currentDestination.lon : null
-      };
-
-      const response = await fetch('/api/admin/ml_feedback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const resData = await response.json();
-
-      if (response.ok) {
-        alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
-      } else {
-        alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
-      }
-    } catch (err) {
-      alert(`Network Error: ${err.message}`);
-    } finally {
-      if (btn) btn.disabled = false;
+      resData = JSON.parse(rawText);
+    } catch (e) {
+      // Triggered if Flask or Render returns HTML (404/500/502)
+      throw new Error(`Server returned HTML/plain text (${response.status}): ${rawText.substring(0, 120)}...`);
     }
+
+    // 2. Handle JSON response
+    if (response.ok) {
+      alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
+    } else {
+      alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
+    }
+  } catch (err) {
+    alert(`Network Error: ${err.message}`);
+  } finally {
+    if (btn) btn.disabled = false;
   }
+}
 
   // 1. Fallback if browser lacks geolocation capability
   if (!navigator.geolocation) {

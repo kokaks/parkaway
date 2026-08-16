@@ -1380,33 +1380,66 @@ function toggleAdminMode() {
   loadParkingData();
 }
 
-function logMLFeedback() {
-  if (userLat === null || userLon === null) {
-    alert('Please allow location access so we can log your GPS position as the parking spot!');
-    return;
-  }
+async function logMLFeedback() {
+  const btn = document.getElementById('ml-log-toggle');
+  if (btn) btn.disabled = true;
 
-  const payload = { lat: userLat, lon: userLon };
-  if (currentDest) {
-    payload.dest_lat = currentDest.lat;
-    payload.dest_lon = currentDest.lon;
-  }
+  // Helper function to transmit payload to Flask backend
+  async function sendMLData(lat, lon) {
+    try {
+      const payload = {
+        lat: parseFloat(lat),
+        lon: parseFloat(lon),
+        dest_lat: window.currentDestination ? window.currentDestination.lat : null,
+        dest_lon: window.currentDestination ? window.currentDestination.lon : null
+      };
 
-  fetch('/api/admin/ml_feedback', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
-  .then(r => r.json())
-  .then((res) => {
-    let matchMsg = '';
-    if (res.parked_at_recommended_spot === true) {
-      matchMsg = ' You parked at one of the recommended spots!';
-    } else if (res.parked_at_recommended_spot === false) {
-      matchMsg = ' You parked somewhere other than the recommended spots.';
+      const response = await fetch('/api/admin/ml_feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const resData = await response.json();
+
+      if (response.ok) {
+        alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
+      } else {
+        alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
+      }
+    } catch (err) {
+      alert(`Network Error: ${err.message}`);
+    } finally {
+      if (btn) btn.disabled = false;
     }
-    alert('Parking location successfully recorded for ML model training!' + matchMsg);
-  });
+  }
+
+  // 1. Fallback if browser lacks geolocation capability
+  if (!navigator.geolocation) {
+    alert("Geolocation unsupported on this browser. Logging map center location instead.");
+    const center = map.getCenter();
+    return sendMLData(center.lat, center.lng);
+  }
+
+  // 2. Execute GPS lookup with explicit error callback and timeout limits
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      sendMLData(position.coords.latitude, position.coords.longitude);
+    },
+    (error) => {
+      console.warn("GPS Location error:", error);
+      alert(`Location access failed (${error.message}). Logging current map center coordinates as fallback.`);
+      const center = map.getCenter();
+      sendMLData(center.lat, center.lng);
+    },
+    {
+      enableHighAccuracy: false, // Set to false on mobile to prevent GPS hardware timeouts
+      timeout: 8000,
+      maximumAge: 10000
+    }
+  );
 }
 
 function openAdminModal(feature) {

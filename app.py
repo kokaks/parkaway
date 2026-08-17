@@ -119,7 +119,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --------------------------------------------------------------------------
-# Machine Learning Feedback Model (Optimized for PostgreSQL / Render)
+# Machine Learning Feedback & Admin Data Models (PostgreSQL)
 # --------------------------------------------------------------------------
 class MLFeedback(db.Model):
     __tablename__ = 'ml_feedback'
@@ -157,16 +157,21 @@ class MLFeedback(db.Model):
     dest_lon = db.Column(db.Float, nullable=True)
     distance_parking_to_destination_m = db.Column(db.Float, nullable=True)
 
-    # Recommendation-Match Ground Truth (did the user park where the app
-    # recommended, or somewhere else?) — key label for training/evaluating
-    # the parking recommendation model.
+    # Recommendation-Match Ground Truth
     parked_at_recommended_spot = db.Column(db.Boolean, nullable=True)
     recommended_rank_matched = db.Column(db.Integer, nullable=True)
     distance_to_nearest_recommendation_m = db.Column(db.Float, nullable=True)
 
-# Create the tables automatically
-with app.app_context():
-    db.create_all()
+class ParkingSegment(db.Model):
+    __tablename__ = 'parking_segments'
+
+    id = db.Column(db.String(64), primary_key=True)
+    name = db.Column(db.String(128))
+    parking_type = db.Column(db.String(32))
+    geometry_type = db.Column(db.String(32))
+    coordinates = db.Column(db.JSON, nullable=False)
+    centroid_lat = db.Column(db.Float)
+    centroid_lon = db.Column(db.Float)
 
 # --------------------------------------------------------------------------
 # Contextual Factor 1: Destination POI Busyness Model & Data
@@ -242,7 +247,6 @@ FALLBACK_POIS = [
     {"name": "Opera & Ballet Theatre", "type": "tourist_attraction", "lat": 40.1848, "lon": 44.5158},
 ]
 
-
 def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
     if poi_type == "restaurant":
         if 12 <= hour <= 14:
@@ -310,9 +314,7 @@ def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
         return 0.50
     return 0.40
 
-
 _BUSYNESS_CACHE: dict[str, tuple[float, float]] = {}
-
 
 def calculate_destination_busyness(lat: float, lon: float, now: datetime | None = None) -> float:
     now = now or datetime.now()
@@ -348,7 +350,6 @@ def calculate_destination_busyness(lat: float, lon: float, now: datetime | None 
 # --------------------------------------------------------------------------
 
 _TRAFFIC_CACHE = {"timestamp": 0.0, "multiplier": 1.0}
-
 
 def fetch_live_traffic_multiplier() -> float:
     now_ts = time.time()
@@ -400,7 +401,6 @@ _WEATHER_CACHE = {
         "summary": "22°C, Clear",
     },
 }
-
 
 def fetch_live_weather() -> dict:
     now_ts = time.time()
@@ -746,12 +746,43 @@ def load_parking_features(force_refresh: bool = False) -> list[dict]:
         CACHE_FILE.write_text(json.dumps({"features": normalized, "source": "fallback"}, ensure_ascii=False))
         return normalized
 
-PARKING_FEATURES: list[dict] = load_parking_features()
+# Set global store for caching, hydrated below inside app context
+PARKING_FEATURES: list[dict] = []
 
-
-def _save_ground_truth():
-    GROUND_TRUTH_FILE.write_text(json.dumps({"features": PARKING_FEATURES}, ensure_ascii=False))
-
+with app.app_context():
+    db.create_all()
+    
+    # Load parking segments from DB; seed if empty.
+    segments = ParkingSegment.query.all()
+    if not segments:
+        print("[data] PostgreSQL 'parking_segments' table is empty. Seeding initial data...")
+        initial_features = load_parking_features(force_refresh=True)
+        for f in initial_features:
+            lat, lon = _extract_lat_lon(f)
+            seg = ParkingSegment(
+                id=f["id"],
+                name=f["name"],
+                parking_type=f["parking_type"],
+                geometry_type=f["geometry_type"],
+                coordinates=f["coordinates"],
+                centroid_lat=lat,
+                centroid_lon=lon
+            )
+            db.session.add(seg)
+        db.session.commit()
+        PARKING_FEATURES = initial_features
+        print(f"[data] Successfully seeded {len(PARKING_FEATURES)} segments into PostgreSQL.")
+    else:
+        print(f"[data] Loaded {len(segments)} segments from PostgreSQL database.")
+        for s in segments:
+            PARKING_FEATURES.append({
+                "id": s.id,
+                "name": s.name,
+                "parking_type": s.parking_type,
+                "geometry_type": s.geometry_type,
+                "coordinates": s.coordinates,
+                "centroid": [s.centroid_lon, s.centroid_lat]
+            })
 
 # --------------------------------------------------------------------------
 # Base Simulated Real-Time Traffic / Availability Engine
@@ -773,7 +804,6 @@ def _hour_congestion_curve(hour: int, is_weekend: bool) -> float:
             22: .22, 23: .12,
         }
     return curve.get(hour, 0.3)
-
 
 def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | None = None) -> dict:
     if parking_type == "unavailable":
@@ -824,7 +854,6 @@ def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | N
         "traffic_level": traffic_level,
     }
 
-
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371000.0
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -832,7 +861,6 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlambda = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     return 2 * R * math.asin(math.sqrt(a))
-
 
 # --------------------------------------------------------------------------
 # Routes: pages & PWA
@@ -846,7 +874,6 @@ def index():
         center_lon=MAP_CENTER[1],
         type_colors=TYPE_COLORS,
     )
-
 
 @app.route("/manifest.json")
 def pwa_manifest():
@@ -872,7 +899,6 @@ def pwa_manifest():
         ]
     }
     return jsonify(manifest_data)
-
 
 @app.route("/sw.js")
 def service_worker():
@@ -907,7 +933,6 @@ def service_worker():
     response = make_response(js)
     response.headers['Content-Type'] = 'application/javascript'
     return response
-
 
 # --------------------------------------------------------------------------
 # Routes: Search & Geocoding Autocomplete API
@@ -1033,7 +1058,6 @@ def api_search():
 
     return jsonify(results[:8])
 
-
 # --------------------------------------------------------------------------
 # Routes: System APIs
 # --------------------------------------------------------------------------
@@ -1041,7 +1065,6 @@ def api_search():
 @app.route("/api/weather")
 def api_weather():
     return jsonify(fetch_live_weather())
-
 
 @app.route("/api/parking")
 def api_parking():
@@ -1073,7 +1096,6 @@ def api_parking():
         "generated_at": now.isoformat(),
         "features": geojson_features,
     })
-
 
 @app.route("/api/traffic")
 def api_traffic():
@@ -1114,7 +1136,6 @@ def api_traffic():
         "overall_congestion_score": round(overall_avg, 1),
         "streets": rows,
     })
-
 
 def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_mult, weather_info):
     """
@@ -1202,7 +1223,6 @@ def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_
     candidates.sort(key=lambda c: c["final_score"], reverse=True)
     return candidates, current_radius
 
-
 @app.route("/api/recommend")
 def api_recommend():
     try:
@@ -1232,7 +1252,6 @@ def api_recommend():
         "recommendations": top3,
     })
 
-
 @app.route("/api/admin/feature", methods=["POST"])
 def api_admin_save_feature():
     global PARKING_FEATURES
@@ -1242,38 +1261,61 @@ def api_admin_save_feature():
 
     normalized = _normalize_feature(data)
 
+    # Automatically generate an ID if the frontend passes an un-saved segment
     if not normalized["id"] or normalized["id"] == "unk":
-        return jsonify({"error": "Segment missing a valid ID."}), 400
+        normalized["id"] = hashlib.md5(str(time.time()).encode()).hexdigest()[:10]
 
-    updated = False
+    lat, lon = _extract_lat_lon(normalized)
+
+    # --- Database Persistence (Prevents ephemeral loss on server reload) ---
+    segment = ParkingSegment.query.get(normalized["id"])
+    if segment:
+        segment.name = normalized["name"]
+        segment.parking_type = normalized["parking_type"]
+        segment.geometry_type = normalized["geometry_type"]
+        segment.coordinates = normalized["coordinates"]
+        segment.centroid_lat = lat
+        segment.centroid_lon = lon
+        updated = True
+    else:
+        segment = ParkingSegment(
+            id=normalized["id"],
+            name=normalized["name"],
+            parking_type=normalized["parking_type"],
+            geometry_type=normalized["geometry_type"],
+            coordinates=normalized["coordinates"],
+            centroid_lat=lat,
+            centroid_lon=lon
+        )
+        db.session.add(segment)
+        updated = False
+
+    db.session.commit()
+
+    # --- In-memory Update ---
     for i, f in enumerate(PARKING_FEATURES):
         if f["id"] == normalized["id"]:
             PARKING_FEATURES[i] = normalized
-            updated = True
             break
-
-    if not updated:
+    else:
         PARKING_FEATURES.append(normalized)
-
-    _save_ground_truth()
 
     return jsonify({
         "status": "ok",
         "action": "updated" if updated else "created",
         "id": normalized["id"],
         "total_segments": len(PARKING_FEATURES),
+        "parking_type_saved": normalized["parking_type"]
     })
 
-
 # --------------------------------------------------------------------------
-# Machine Learning Feedback Logging Endpoint (Zero-Friction Backend Feature Extraction)
+# Machine Learning Feedback Logging Endpoint
 # --------------------------------------------------------------------------
 @app.route('/api/admin/ml_feedback', methods=['POST'])
 def log_ml_feedback():
     data = request.get_json()
     
-    # Validate payload coordinates ('lat'/'lon' = the user's live GPS position,
-    # i.e. the actual parking spot, auto-captured at the moment they log)
+    # Validate payload coordinates
     if not data or 'lat' not in data or 'lon' not in data:
         return jsonify({"error": "Missing location data ('lat' and 'lon' required)."}), 400
 
@@ -1283,9 +1325,6 @@ def log_ml_feedback():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid coordinate values."}), 400
 
-    # Optional destination context ('dest_lat'/'dest_lon' = the point the user
-    # was navigating to) — enables labeling whether they parked in one of the
-    # app's recommended spots for that destination.
     dest_lat = None
     dest_lon = None
     if 'dest_lat' in data and 'dest_lon' in data:
@@ -1330,9 +1369,6 @@ def log_ml_feedback():
         simulated_avail = sim_state.get("availability_pct")
         simulated_cong = sim_state.get("congestion_score")
 
-    # 5. If a destination was supplied, evaluate whether the logged GPS
-    # parking spot matches one of the app's top recommended candidates for
-    # that destination (ground-truth label for recommender evaluation/training).
     distance_parking_to_destination_m = None
     parked_at_recommended = None
     recommended_rank_matched = None

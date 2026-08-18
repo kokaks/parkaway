@@ -1179,7 +1179,20 @@ function loadParkingData() {
 
   fetch('/api/parking')
     .then(r => r.json())
-    .then(geojson => {
+    .then(data => {
+      // Ensure the array of custom objects is properly mapped into a valid GeoJSON FeatureCollection for Leaflet
+      const geojson = Array.isArray(data) ? {
+        type: "FeatureCollection",
+        features: data.map(item => ({
+          type: "Feature",
+          properties: item,
+          geometry: {
+            type: item.geometry_type || 'LineString',
+            coordinates: item.coordinates
+          }
+        }))
+      } : data;
+
       parkingLayer = L.geoJSON(geojson, {
         style: (feature) => ({
           color: feature.properties.color || '#7f8c8d',
@@ -1194,8 +1207,8 @@ function loadParkingData() {
             <div style="font-family:'Inter',sans-serif; color:#14151a;">
               <strong style="font-size:14px; font-weight:700;">${escapeHtml(props.name)}</strong><br/>
               <span style="font-size:12px; color:#555;">Type: <b>${TYPE_LABEL[props.parking_type] || props.parking_type}</b></span><br/>
-              <span style="font-size:12px; color:#555;">Availability: <b>${props.availability_pct}%</b></span><br/>
-              <span style="font-size:12px; color:#555;">Traffic Level: <b>${props.traffic_level}</b></span>
+              <span style="font-size:12px; color:#555;">Availability: <b>${props.availability_pct || '--'}%</b></span><br/>
+              <span style="font-size:12px; color:#555;">Traffic Level: <b>${props.traffic_level || '--'}</b></span>
             </div>
           `);
 

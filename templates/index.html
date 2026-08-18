@@ -1214,20 +1214,6 @@ function loadParkingData() {
           coords = coords.map(ring => ring.map(normalizePoint));
         }
 
-        // 3. Fix Spiderweb Jumps (Flattened independent segments)
-        // If the backend strung multiple independent 2-point street segments into one continuous LineString,
-        // we chunk them into a MultiLineString so they render as disconnected segments.
-        if (type === 'LineString' && coords.length > 2) {
-          type = 'MultiLineString';
-          const multiCoords = [];
-          for (let i = 0; i < coords.length; i += 2) {
-            if (coords[i+1]) {
-              multiCoords.push([coords[i], coords[i+1]]);
-            }
-          }
-          coords = multiCoords;
-        }
-
         features.push({
           type: "Feature",
           properties: item.properties || item,
@@ -1566,8 +1552,12 @@ function saveAdminFeature() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   })
-  .then(r => r.json())
-  .then(() => {
+  .then(r => r.json().then(body => ({ ok: r.ok, body })))
+  .then(({ ok, body }) => {
+    if (!ok) {
+      alert(body.error || 'Could not save this segment.');
+      return;
+    }
     closeAdminModal();
     loadParkingData();
   })

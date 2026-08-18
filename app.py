@@ -1,1524 +1,1593 @@
-"""
-Yerevan Smart Parking Recommender
-==================================
-Production-ready Flask backend that:
-  1. Loads curbside + lot parking geometry for Kentron, Yerevan (via ground-truth,
-     OSMnx cache, or fallback dataset).
-  2. Simulates real-time traffic congestion / space availability using a
-     time-of-day model (rush hour vs. off-peak vs. night).
-  3. Integrates Contextual Factors:
-     - Destination POI Busyness (25% weight) using hourly activity profiles.
-     - Real-Time Live Traffic adjustment (8% weight) with simulated fallback.
-     - Real-Time Live Weather integration (2% weight) with neutral fallback.
-     - Proximity / Distance weighting highly prioritized (35% weight).
-  4. Serves the parking network as GeoJSON (/api/parking).
-  5. Serves a multi-factor destination recommendation engine (/api/recommend).
-  6. Serves a rolled-up live traffic snapshot (/api/traffic).
-  7. Serves an administrative curation API (/api/admin/feature).
-  8. Serves an ML feedback recording API (/api/admin/ml_feedback).
-  9. Serves a live search/autocomplete geocoding engine (/api/search).
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#14151a" />
+<title>Yerevan Smart Parking</title>
 
-Run:
-    pip install -r requirements.txt
-    python app.py
-Then open http://127.0.0.1:5000
-"""
+<!-- PWA Manifest and Apple Touch Icon Hooks -->
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/MUTCD_D4-1.svg/192px-MUTCD_D4-1.svg.png" />
 
-from __future__ import annotations
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
 
-from flask_sqlalchemy import SQLAlchemy
-import hashlib
-import json
-import math
-import os
-import random
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
-from datetime import datetime
-from pathlib import Path
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js"></script>
 
-from flask import Flask, jsonify, render_template, request, make_response
-
-# --------------------------------------------------------------------------
-# Configuration
-# --------------------------------------------------------------------------
-
-PLACE_NAME = "Kentron, Yerevan, Armenia"
-MAP_CENTER = (40.1792, 44.5152)
-
-DATA_DIR = Path(__file__).parent / "data"
-CACHE_FILE = DATA_DIR / "parking_cache.geojson"
-GROUND_TRUTH_FILE = DATA_DIR / "ground_truth.geojson"
-ML_DATA_FILE = DATA_DIR / "ml_training_data.json"
-DATA_DIR.mkdir(exist_ok=True)
-
-PARKING_TAGS = {
-    "parking:lane": True,
-    "parking:left": True,
-    "parking:right": True,
-    "parking:both": True,
-    "amenity": "parking",
-}
-
-TYPE_COLORS = {
-    "paid": "#e74c3c",         # Red lines
-    "free": "#2ecc71",         # Green curbside lanes
-    "lot": "#3498db",          # Dedicated lots (polygons)
-    "unavailable": "#f39c12",  # Orange / No-parking zones
-    "unspecified": "#7f8c8d",  # Grey / general
-}
-
-TYPE_BASE_WEIGHT = {
-    "free": 100,
-    "lot": 85,
-    "paid": 70,
-    "unspecified": 45,
-    "unavailable": 0,
-}
-
-# Max distance (meters) between a logged GPS parking spot and a recommended
-# candidate location for that spot to be considered a "match" against the
-# recommendation engine's output.
-RECOMMENDATION_MATCH_RADIUS_M = 40.0
-
-# Phonetic / transliteration synonyms for fuzzy matching Yerevan streets
-YEREVAN_STREET_SYNONYMS = {
-    "mastoc": "Mashtots",
-    "mashtoc": "Mashtots",
-    "mashtos": "Mashtots",
-    "մաշտոց": "Mashtots",
-    "abovian": "Abovyan",
-    "աբովյան": "Abovyan",
-    "toumanian": "Tumanyan",
-    "thoumanian": "Tumanyan",
-    "թումանյան": "Tumanyan",
-    "saryan": "Saryan",
-    "սարյան": "Saryan",
-    "sayat": "Sayat-Nova",
-    "սայաթ": "Sayat-Nova",
-    "bagramyan": "Baghramyan",
-    "bagramian": "Baghramyan",
-    "բաղրամյան": "Baghramyan",
-    "amirian": "Amiryan",
-    "ամիրյան": "Amiryan",
-    "terian": "Teryan",
-    "տերյան": "Teryan",
-    "pushkin": "Pushkin",
-    "պուշկին": "Pushkin",
-    "northern": "Northern Avenue",
-    "republic": "Republic Square",
-}
-
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db').replace("postgres://", "postgresql://", 1)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
-# --------------------------------------------------------------------------
-# Machine Learning Feedback & Admin Data Models (PostgreSQL)
-# --------------------------------------------------------------------------
-class MLFeedback(db.Model):
-    __tablename__ = 'ml_feedback'
-
-    id = db.Column(db.Integer, primary_key=True)
+<style>
+  :root {
+    --basalt-950: #14151a;
+    --basalt-900: #1b1d24;
+    --basalt-800: #24262f;
+    --basalt-700: #32343f;
+    --basalt-line: #3a3d4a;
+    --fog: #9498a6;
+    --paper: #eef0f4;
+    --apricot: #f5a536;
+    --apricot-dim: #7a5a2a;
+    --tuff-pink: #d9808a;
+    --leaf: #34c77b;
+    --alert: #e2574c;
+    --sapphire: #4d8ff0;
+    --unavailable: #f39c12;
     
-    # Core Spatial Data
-    lat = db.Column(db.Float, nullable=False)
-    lon = db.Column(db.Float, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    /* Device Safe Area insets to avoid notches, islands, and rounded corners */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+  }
 
-    # Temporal Derivations (Zero-Friction ML Features)
-    hour = db.Column(db.Integer, nullable=False)
-    day_of_week = db.Column(db.Integer, nullable=False)  # 0 = Monday, 6 = Sunday
-    is_weekend = db.Column(db.Boolean, nullable=False)
+  * { 
+    box-sizing: border-box; 
+    -webkit-tap-highlight-color: transparent;
+  }
 
-    # Spatial Context & Segment Matching
-    matched_segment_id = db.Column(db.String(64), nullable=True, index=True)
-    parking_type = db.Column(db.String(32), nullable=True)
-    distance_to_segment_m = db.Column(db.Float, nullable=True)
+  html, body {
+    margin: 0; padding: 0; 
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+    background: var(--basalt-950);
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
 
-    # Real-Time Contextual Factors
-    destination_busyness = db.Column(db.Float, nullable=True)
-    traffic_multiplier = db.Column(db.Float, nullable=True)
-    weather_condition = db.Column(db.String(32), nullable=True)
-    weather_factor = db.Column(db.Float, nullable=True)
-    temp_c = db.Column(db.Float, nullable=True)
+  .display { font-family: 'Space Grotesk', sans-serif; }
 
-    # System Simulation Baseline (At logging instant)
-    simulated_availability_pct = db.Column(db.Float, nullable=True)
-    simulated_congestion_score = db.Column(db.Float, nullable=True)
+  #app {
+    display: grid;
+    grid-template-columns: 400px 1fr;
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+    position: relative;
+  }
 
-    # Destination Context (the point the user was navigating to, if any)
-    dest_lat = db.Column(db.Float, nullable=True)
-    dest_lon = db.Column(db.Float, nullable=True)
-    distance_parking_to_destination_m = db.Column(db.Float, nullable=True)
+  /* ---------------- Sidebar ---------------- */
+  #sidebar {
+    background: var(--basalt-900);
+    border-right: 1px solid var(--basalt-line);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    z-index: 20;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
 
-    # Recommendation-Match Ground Truth
-    parked_at_recommended_spot = db.Column(db.Boolean, nullable=True)
-    recommended_rank_matched = db.Column(db.Integer, nullable=True)
-    distance_to_nearest_recommendation_m = db.Column(db.Float, nullable=True)
+  /* Mobile Sheet Drag Handle */
+  #mobile-sheet-handle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 0 6px;
+    background: var(--basalt-900);
+    border-bottom: 1px solid var(--basalt-line);
+    cursor: pointer;
+    touch-action: none;
+  }
+  .handle-bar {
+    width: 42px;
+    height: 5px;
+    background: var(--basalt-line);
+    border-radius: 3px;
+  }
 
-class ParkingSegment(db.Model):
-    __tablename__ = 'parking_segments'
+  #sidebar-scroll {
+    overflow-y: auto;
+    flex: 1;
+    padding-bottom: 24px;
+    -webkit-overflow-scrolling: touch;
+  }
+  #sidebar-scroll::-webkit-scrollbar { width: 6px; }
+  #sidebar-scroll::-webkit-scrollbar-thumb { background: var(--basalt-line); border-radius: 3px; }
 
-    id = db.Column(db.String(64), primary_key=True)
-    name = db.Column(db.String(128))
-    parking_type = db.Column(db.String(32))
-    geometry_type = db.Column(db.String(32))
-    coordinates = db.Column(db.JSON, nullable=False)
-    centroid_lat = db.Column(db.Float)
-    centroid_lon = db.Column(db.Float)
+  .brand {
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid var(--basalt-line);
+  }
+  .brand-eyebrow {
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--apricot);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .brand h1 {
+    font-size: 22px;
+    margin: 0;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+  .brand p {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: var(--fog);
+    line-height: 1.5;
+  }
+  .clock-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--fog);
+  }
+  .live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--leaf);
+    box-shadow: 0 0 0 0 rgba(52,199,123,.6);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(52,199,123,.55); }
+    70%  { box-shadow: 0 0 0 6px rgba(52,199,123,0); }
+    100% { box-shadow: 0 0 0 0 rgba(52,199,123,0); }
+  }
 
-# --------------------------------------------------------------------------
-# Contextual Factor 1: Destination POI Busyness Model & Data
-# --------------------------------------------------------------------------
+  .section {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--basalt-line);
+  }
+  .section-title {
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--fog);
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
 
-POI_WEIGHTS = {
-    "restaurant": 3,
-    "cafe": 2,
-    "coffee_shop": 2,
-    "bar": 3,
-    "university": 5,
-    "school": 3,
-    "office": 4,
-    "bank": 2,
-    "hospital": 5,
-    "pharmacy": 1,
-    "shopping_centre": 5,
-    "supermarket": 3,
-    "convenience": 2,
-    "museum": 2,
-    "hotel": 2,
-    "metro_station": 4,
-    "bus_station": 3,
-    "government": 4,
-    "park": 1,
-    "tourist_attraction": 3,
+  /* Destination picker */
+  #destination-hint {
+    font-size: 13px;
+    color: var(--fog);
+    background: var(--basalt-800);
+    border: 1px dashed var(--basalt-line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+
+  .preset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .preset-btn {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 12px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    min-height: 44px;
+    transition: border-color .15s, background .15s;
+    touch-action: manipulation;
+  }
+  .preset-btn:hover, .preset-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
+
+  #destination-active {
+    display: none;
+    margin-top: 12px;
+    background: rgba(245,165,54,.09);
+    border: 1px solid var(--apricot-dim);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+  }
+  #destination-active .coord {
+    font-family: 'Space Grotesk', sans-serif;
+    color: var(--apricot);
+    font-size: 12px;
+  }
+  #clear-destination {
+    background: none; border: none; color: var(--fog);
+    font-size: 12px; text-decoration: underline; cursor: pointer;
+    padding: 8px 0; margin-top: 4px;
+    touch-action: manipulation;
+  }
+
+  /* Recommendations */
+  .rec-card {
+    display: flex;
+    gap: 12px;
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    align-items: center;
+  }
+  .rec-rank {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--basalt-950);
+    background: var(--apricot);
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .gauge {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .gauge-inner {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--basalt-800);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .rec-body { flex: 1; min-width: 0; }
+  .rec-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .rec-meta {
+    font-size: 11.5px;
+    color: var(--fog);
+    margin-top: 3px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .pill-free   { background: rgba(52,199,123,.15); color: var(--leaf); }
+  .pill-paid   { background: rgba(226,87,76,.15); color: var(--alert); }
+  .pill-lot    { background: rgba(77,143,240,.15); color: var(--sapphire); }
+  .pill-unavailable { background: rgba(243,156,18,.15); color: var(--unavailable); }
+  .pill-unspecified { background: rgba(148,152,166,.15); color: var(--fog); }
+
+  #rec-empty {
+    font-size: 13px;
+    color: var(--fog);
+    text-align: center;
+    padding: 18px 8px;
+    line-height: 1.6;
+  }
+
+  /* Traffic cards */
+  .traffic-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--basalt-line);
+    font-size: 13px;
+  }
+  .traffic-card:last-child { border-bottom: none; }
+  .traffic-name { color: var(--paper); font-weight: 500; }
+  .traffic-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .badge-Low    { background: rgba(52,199,123,.15); color: var(--leaf); }
+  .badge-Medium { background: rgba(245,165,54,.15); color: var(--apricot); }
+  .badge-Heavy  { background: rgba(226,87,76,.15); color: var(--alert); }
+
+  .overall-banner {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .overall-banner .big {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+  }
+
+  /* ---------------- Map ---------------- */
+  #map-wrap { position: relative; width: 100%; height: 100%; }
+  #map { height: 100%; width: 100%; background: var(--basalt-950); }
+
+  .leaflet-tile-pane { filter: saturate(0.85) brightness(0.95); }
+
+  /* ---------------- Top UI Overlays ---------------- */
+  
+  /* Container for top UI elements to structurally prevent overlapping */
+  .top-ui-container {
+    position: absolute;
+    top: calc(16px + var(--safe-top));
+    left: calc(20px + var(--safe-left));
+    right: calc(20px + var(--safe-right));
+    z-index: 750;
+    display: flex;
+    flex-direction: row; /* Desktop layout side-by-side */
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none; /* Let clicks pass through empty space */
+    gap: 12px;
+  }
+  
+  .top-ui-container > * {
+    pointer-events: auto; /* Re-enable clicks on the actual UI components */
+  }
+
+  /* Search Bar Wrapper */
+  #search-bar-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  .search-input-box {
+    display: flex;
+    align-items: center;
+    background: rgba(27, 29, 36, 0.94);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    padding: 0 12px;
+    height: 48px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .search-input-box:focus-within {
+    border-color: var(--apricot);
+    box-shadow: 0 8px 28px rgba(245, 165, 84, 0.25);
+  }
+
+  .search-icon {
+    width: 18px;
+    height: 18px;
+    color: var(--fog);
+    flex-shrink: 0;
+    margin-right: 10px;
+  }
+
+  #search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--paper);
+    font-family: 'Inter', sans-serif;
+    font-size: 16px; /* 16px prevents iOS auto-zoom */
+    height: 100%;
+  }
+
+  #search-input::placeholder {
+    color: var(--fog);
+  }
+
+  .search-clear-btn {
+    background: transparent;
+    border: none;
+    color: var(--fog);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 6px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 32px;
+    touch-action: manipulation;
+  }
+  .search-clear-btn.hidden {
+    display: none;
+  }
+
+  .search-dropdown {
+    background: rgba(27, 29, 36, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    margin-top: 6px;
+    max-height: 40vh; /* Responsive height to avoid pushing too far */
+    overflow-y: auto;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    -webkit-overflow-scrolling: touch;
+  }
+  .search-dropdown.hidden {
+    display: none;
+  }
+
+  .search-item {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--basalt-line);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: background 0.15s;
+    min-height: 48px;
+    justify-content: center;
+    touch-action: manipulation;
+  }
+  .search-item:last-child {
+    border-bottom: none;
+  }
+  .search-item:hover, .search-item:active {
+    background: var(--basalt-800);
+  }
+
+  .search-item-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--paper);
+  }
+
+  .search-item-sub {
+    font-size: 11.5px;
+    color: var(--fog);
+  }
+
+  .search-no-results {
+    padding: 14px;
+    font-size: 13px;
+    color: var(--fog);
+    text-align: center;
+  }
+
+  /* Admin Buttons Wrapper */
+  #admin-toggle-wrap {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  
+  .admin-btn {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    min-height: 44px; /* Essential touch target size */
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    transition: all .2s ease;
+    touch-action: manipulation;
+  }
+  .admin-btn:hover, .admin-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
+  
+  .admin-btn.active {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    border-color: var(--apricot);
+  }
+  
+  #ml-log-toggle { border-color: var(--leaf); color: var(--leaf); }
+  #ml-log-toggle:hover { background: rgba(52,199,123,.15); }
+  #ml-log-toggle.active { background: var(--leaf) !important; color: var(--basalt-950) !important; border-color: var(--leaf) !important; }
+
+  /* Adjust native Leaflet Controls to respect safe areas */
+  .leaflet-control-container .leaflet-top {
+    top: calc(var(--safe-top) + 80px); /* Pushes down to clear custom top UI */
+  }
+  .leaflet-control-container .leaflet-right {
+    right: var(--safe-right);
+  }
+  .leaflet-control-container .leaflet-bottom {
+    bottom: var(--safe-bottom);
+  }
+  .leaflet-control-container .leaflet-left {
+    left: var(--safe-left);
+  }
+
+  #legend {
+    position: absolute;
+    bottom: calc(24px + var(--safe-bottom));
+    left: calc(20px + var(--safe-left));
+    z-index: 500;
+    background: rgba(27,29,36,.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 12.5px;
+    width: 220px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  #legend h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    margin: 0 0 10px;
+    font-size: 12.5px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--fog);
+  }
+  .legend-row { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+  .legend-row:last-child { margin-bottom: 0; }
+  .swatch { width: 16px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  #hint-banner {
+    position: absolute;
+    top: calc(76px + var(--safe-top));
+    left: 50%; transform: translateX(-50%);
+    z-index: 500;
+    background: rgba(27,29,36,.92);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--basalt-line);
+    border-radius: 999px;
+    padding: 9px 18px;
+    font-size: 12.5px;
+    color: var(--paper);
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    transition: opacity .2s;
+    pointer-events: none;
+    max-width: 90vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #hint-banner .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--apricot); flex-shrink: 0; }
+
+  .rec-marker {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    width: 26px; height: 26px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 10px rgba(0,0,0,.4);
+    border: 2px solid var(--basalt-950);
+  }
+  .rec-marker span { transform: rotate(45deg); }
+
+  .dest-marker {
+    width: 18px; height: 18px;
+    background: var(--sapphire);
+    border: 3px solid var(--paper);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(77,143,240,.25);
+  }
+
+  /* Live GPS user-location marker (distinct from the destination pin) */
+  .user-marker-wrap { position: relative; }
+  .user-location-marker {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px; height: 16px;
+    background: var(--leaf);
+    border: 3px solid var(--paper);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(52,199,123,.25);
+    z-index: 2;
+  }
+  .user-location-pulse {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px; height: 16px;
+    background: rgba(52,199,123,.45);
+    border-radius: 50%;
+    animation: user-pulse 2.2s infinite;
+    z-index: 1;
+  }
+  @keyframes user-pulse {
+    0%   { transform: translate(-50%, -50%) scale(1); opacity: .8; }
+    100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
+  }
+
+  #admin-modal {
+    position: absolute;
+    top: calc(75px + var(--safe-top));
+    right: calc(20px + var(--safe-right));
+    z-index: 1000;
+    background: rgba(27,29,36,.96);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--basalt-line);
+    padding: 18px;
+    border-radius: 14px;
+    width: 290px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #admin-modal.hidden { display: none; }
+  #admin-modal h3 {
+    margin: 0 0 14px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 15px;
+    color: var(--paper);
+  }
+  .admin-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .admin-field label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--fog);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .admin-field input, .admin-field select {
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--paper);
+    padding: 10px;
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .admin-field input:focus, .admin-field select:focus {
+    outline: none;
+    border-color: var(--apricot);
+  }
+  .admin-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .btn-save, .btn-delete, .btn-cancel {
+    flex: 1;
+    font-weight: 700;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .btn-save {
+    background: var(--apricot);
+    color: var(--basalt-950);
+    border: none;
+  }
+  .btn-delete {
+    background: rgba(226,87,76,.18);
+    color: var(--alert);
+    border: 1px solid rgba(226,87,76,.3);
+  }
+  .btn-cancel {
+    background: var(--basalt-800);
+    color: var(--fog);
+    border: 1px solid var(--basalt-line);
+    font-weight: 600;
+  }
+
+  /* ---------------- Responsive / Mobile Adaptations ---------------- */
+  @media (max-width: 768px) {
+    #app {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr;
+    }
+
+    #sidebar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      width: 100%;
+      height: 60vh;
+      height: 60dvh;
+      border-right: none;
+      border-top: 1px solid var(--basalt-line);
+      border-radius: 18px 18px 0 0;
+      box-shadow: 0 -8px 32px rgba(0,0,0,0.6);
+      z-index: 1000;
+      transform: translateY(0);
+      padding-bottom: var(--safe-bottom);
+    }
+
+    #sidebar.sheet-collapsed {
+      transform: translateY(calc(100% - 64px - var(--safe-bottom)));
+    }
+
+    #mobile-sheet-handle {
+      display: flex;
+    }
+
+    .brand {
+      padding: 12px 18px 14px;
+    }
+    .brand h1 { font-size: 18px; }
+    .brand p { font-size: 12px; margin-top: 4px; }
+    .clock-row { margin-top: 6px; font-size: 11px; }
+
+    .section { padding: 14px 18px; }
+
+    /* Grouping fixes overlap: on mobile stack elements vertically */
+    .top-ui-container {
+      top: calc(10px + var(--safe-top));
+      left: calc(12px + var(--safe-left));
+      right: calc(12px + var(--safe-right));
+      flex-direction: column;
+    }
+
+    #search-bar-wrap {
+      width: 100%;
+      max-width: none;
+    }
+
+    #admin-toggle-wrap {
+      width: 100%;
+      flex-wrap: wrap; /* Wraps buttons nicely if screen is too narrow */
+    }
+    
+    .admin-btn {
+      padding: 10px 14px; /* Ensure sufficient touch height */
+      font-size: 13px;
+      min-height: 44px; /* Minimum Apple HIG recommendation */
+      flex: 1; /* Stretch on smaller screens for easier tapping */
+    }
+
+    .leaflet-control-container .leaflet-top {
+      top: calc(var(--safe-top) + 130px); /* Clear stacked elements safely */
+    }
+
+    #hint-banner {
+      top: calc(130px + var(--safe-top));
+      font-size: 11px;
+      padding: 6px 12px;
+    }
+
+    #legend {
+      bottom: calc(74px + var(--safe-bottom));
+      left: calc(12px + var(--safe-left));
+      width: 180px;
+      padding: 10px 12px;
+      font-size: 11px;
+    }
+
+    #admin-modal {
+      position: fixed;
+      top: 50%; left: 50%; right: auto;
+      transform: translate(-50%, -50%);
+      width: 90vw;
+      max-width: 330px;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.8);
+    }
+
+    .leaflet-control-zoom {
+      margin-bottom: 70px !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <aside id="sidebar">
+    <div id="mobile-sheet-handle" onclick="toggleMobileSheet()">
+      <div class="handle-bar"></div>
+    </div>
+
+    <div class="brand">
+      <div class="brand-eyebrow">Kentron &middot; Yerevan</div>
+      <h1 class="display">Smart Parking Recommender</h1>
+      <p>Live-simulated curb & lot availability across central Yerevan, scored against real-time congestion.</p>
+      <div class="clock-row">
+        <span class="live-dot"></span>
+        <span id="clock">--:--:--</span>
+        <span style="color:var(--basalt-line)">&bull;</span>
+        <span id="data-source-tag">simulated feed</span>
+      </div>
+      <div class="clock-row" style="color:var(--paper); margin-top: 8px;">
+        <svg style="width:14px; height:14px; color:var(--apricot); margin-right:2px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
+        <span id="weather-display" style="font-weight: 500;">--°C, --</span>
+      </div>
+    </div>
+
+    <div id="sidebar-scroll">
+
+      <div class="section">
+        <div class="section-title">Destination</div>
+        <div id="destination-hint">Search an address above, click anywhere on the map, or jump to a landmark below.</div>
+        <div class="preset-grid" id="presets"></div>
+        <div id="destination-active">
+          <div>Destination set at</div>
+          <div class="coord" id="dest-coords">—</div>
+          <button id="clear-destination" onclick="clearDestination()">Clear destination</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Top 3 Recommended Spots</div>
+        <div id="rec-list">
+          <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
+        </div>
+      </div>
+
+      <div class="section" style="border-bottom:none;">
+        <div class="overall-banner">
+          <div>
+            <div class="section-title" style="margin-bottom:2px;">Live Traffic &middot; Kentron</div>
+            <div style="font-size:11.5px;color:var(--fog);">by street, updated every 15s</div>
+          </div>
+          <div class="big" id="overall-level" style="color:var(--apricot)">—</div>
+        </div>
+        <div id="traffic-list"></div>
+      </div>
+
+    </div>
+  </aside>
+
+  <div id="map-wrap">
+    
+    <!-- Top UI Container preventing independent overlaps -->
+    <div class="top-ui-container">
+      
+      <!-- Floating Address Search Bar -->
+      <div id="search-bar-wrap">
+        <div class="search-input-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="search-input" placeholder="Search address, e.g. Mashtots 23/6..." autocomplete="off" spellcheck="false" />
+          <button id="search-clear-btn" class="search-clear-btn hidden" onclick="clearSearchInput()">&times;</button>
+        </div>
+        <div id="search-dropdown" class="search-dropdown hidden"></div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div id="admin-toggle-wrap">
+        <button id="ml-log-toggle" class="admin-btn" onclick="logMLFeedback()">Log ML Parking</button>
+        <button id="admin-toggle" class="admin-btn" onclick="toggleAdminMode()">Admin / Curation Mode</button>
+      </div>
+
+    </div>
+
+    <div id="map"></div>
+    <div id="hint-banner"><span class="dot"></span><span id="hint-text">Search address or click map to set destination</span></div>
+    
+    <!-- Admin Form Modal Overlay -->
+    <div id="admin-modal" class="hidden">
+      <h3 id="admin-modal-title">Edit Segment</h3>
+      <input type="hidden" id="edit-id" />
+      <input type="hidden" id="edit-geom-type" />
+      <input type="hidden" id="edit-coords" />
+
+      <div class="admin-field">
+        <label for="edit-name">Street / Facility Name</label>
+        <input type="text" id="edit-name" placeholder="e.g. Tumanyan Street" />
+      </div>
+
+      <div class="admin-field">
+        <label for="edit-type">Parking Category</label>
+        <select id="edit-type">
+          <option value="free">Free Curbside</option>
+          <option value="paid">Paid Curbside</option>
+          <option value="lot">Structure / Parking Lot</option>
+          <option value="unavailable">Unavailable / No Parking</option>
+          <option value="unspecified">Unspecified</option>
+        </select>
+      </div>
+
+      <div class="admin-actions">
+        <button class="btn-save" onclick="saveAdminFeature()">Save Segment</button>
+        <button class="btn-delete" id="btn-delete" onclick="deleteAdminFeature()">Delete</button>
+        <button class="btn-cancel" onclick="closeAdminModal()">Cancel</button>
+      </div>
+    </div>
+
+    <div id="legend">
+      <h3>Legend</h3>
+      <div class="legend-row"><span class="swatch" style="background:#e74c3c"></span> Paid parking (red lines)</div>
+      <div class="legend-row"><span class="swatch" style="background:#2ecc71"></span> Free curbside lanes</div>
+      <div class="legend-row"><span class="swatch" style="background:#3498db"></span> Dedicated parking lots</div>
+      <div class="legend-row"><span class="swatch" style="background:#f39c12"></span> Unavailable / No Parking</div>
+      <div class="legend-row"><span class="swatch" style="background:#7f8c8d"></span> Unspecified / general</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CENTER = [{{ center_lat }}, {{ center_lon }}];
+const TYPE_LABEL = { free: 'Free', paid: 'Paid', lot: 'Lot', unavailable: 'Unavailable', unspecified: 'Unspecified' };
+
+const PRESETS = [
+  { name: 'Northern Ave', lat: 40.1798, lon: 44.5133 },
+  { name: 'Opera Theatre', lat: 40.1848, lon: 44.5158 },
+  { name: 'Republic Square', lat: 40.1778, lon: 44.5128 },
+  { name: 'Cascade', lat: 40.1910, lon: 44.5135 },
+  { name: 'Matenadaran', lat: 40.1920, lon: 44.5210 },
+  { name: 'Saryan Wine St', lat: 40.1840, lon: 44.5075 }
+];
+
+let map, parkingLayer, destMarker;
+let recMarkers = [];
+let currentDest = null;
+let isAdminMode = false;
+let searchDebounceTimer = null;
+
+// Live GPS state
+let userMarker = null;
+let userLat = null;
+let userLon = null;
+let geoWatchId = null;
+let hasCenteredOnUser = false;
+
+// Helper function to escape HTML string attributes safely
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
-FALLBACK_POIS = [
-    {"name": "Dolmama Restaurant", "type": "restaurant", "lat": 40.1812, "lon": 44.5140},
-    {"name": "Lavash Restaurant", "type": "restaurant", "lat": 40.1835, "lon": 44.5125},
-    {"name": "Sherep Restaurant", "type": "restaurant", "lat": 40.1778, "lon": 44.5138},
-    {"name": "Jazzve Cafe Opera", "type": "cafe", "lat": 40.1848, "lon": 44.5142},
-    {"name": "Cascade Cafe Cluster", "type": "cafe", "lat": 40.1910, "lon": 44.5135},
-    {"name": "Green Bean Coffee", "type": "coffee_shop", "lat": 40.1852, "lon": 44.5150},
-    {"name": "Coffeeshop Company", "type": "coffee_shop", "lat": 40.1805, "lon": 44.5130},
-    {"name": "Saryan Wine Bars", "type": "bar", "lat": 40.1840, "lon": 44.5075},
-    {"name": "Yerevan State University", "type": "university", "lat": 40.1815, "lon": 44.5260},
-    {"name": "Polytechnic University", "type": "university", "lat": 40.1882, "lon": 44.5230},
-    {"name": "State University of Economics", "type": "university", "lat": 40.1830, "lon": 44.5245},
-    {"name": "Medical University", "type": "university", "lat": 40.1880, "lon": 44.5280},
-    {"name": "Chekhov School No. 55", "type": "school", "lat": 40.1830, "lon": 44.5085},
-    {"name": "Government House", "type": "government", "lat": 40.1775, "lon": 44.5128},
-    {"name": "Ministry of Foreign Affairs", "type": "government", "lat": 40.1762, "lon": 44.5140},
-    {"name": "Yerevan City Hall", "type": "government", "lat": 40.1742, "lon": 44.5078},
-    {"name": "Central Bank of Armenia", "type": "bank", "lat": 40.1745, "lon": 44.5112},
-    {"name": "Ameriabank HQ", "type": "bank", "lat": 40.1785, "lon": 44.5132},
-    {"name": "Ardshinbank HQ", "type": "bank", "lat": 40.1810, "lon": 44.5115},
-    {"name": "Synergy Business Center", "type": "office", "lat": 40.1890, "lon": 44.5180},
-    {"name": "Nairi Medical Center", "type": "hospital", "lat": 40.1875, "lon": 44.5102},
-    {"name": "Heratsi Hospital Complex", "type": "hospital", "lat": 40.1865, "lon": 44.5270},
-    {"name": "Alfa-Pharm Central", "type": "pharmacy", "lat": 40.1825, "lon": 44.5135},
-    {"name": "Tashir Street Shopping Gallery", "type": "shopping_centre", "lat": 40.1800, "lon": 44.5130},
-    {"name": "Vernissage Souvenir Market", "type": "shopping_centre", "lat": 40.1808, "lon": 44.5175},
-    {"name": "Carrefour Metronome", "type": "shopping_centre", "lat": 40.1818, "lon": 44.5162},
-    {"name": "Yerevan City Supermarket", "type": "supermarket", "lat": 40.1822, "lon": 44.5098},
-    {"name": "GUM Market", "type": "supermarket", "lat": 40.1905, "lon": 44.5065},
-    {"name": "SAS Supermarket Abovyan", "type": "supermarket", "lat": 40.1842, "lon": 44.5145},
-    {"name": "History Museum of Armenia", "type": "museum", "lat": 40.1786, "lon": 44.5138},
-    {"name": "National Gallery of Armenia", "type": "museum", "lat": 40.1788, "lon": 44.5142},
-    {"name": "Cafesjian Center for the Arts", "type": "museum", "lat": 40.1915, "lon": 44.5132},
-    {"name": "Matenadaran", "type": "museum", "lat": 40.1920, "lon": 44.5210},
-    {"name": "Marriott Hotel Yerevan", "type": "hotel", "lat": 40.1778, "lon": 44.5122},
-    {"name": "Grand Hotel Yerevan", "type": "hotel", "lat": 40.1815, "lon": 44.5148},
-    {"name": "Ani Plaza Hotel", "type": "hotel", "lat": 40.1838, "lon": 44.5180},
-    {"name": "Republic Square Metro Station", "type": "metro_station", "lat": 40.1782, "lon": 44.5152},
-    {"name": "Yeritasardakan Metro Station", "type": "metro_station", "lat": 40.1865, "lon": 44.5212},
-    {"name": "Zoravar Andranik Metro Station", "type": "metro_station", "lat": 40.1712, "lon": 44.5128},
-    {"name": "France Square Bus Stop", "type": "bus_station", "lat": 40.1860, "lon": 44.5150},
-    {"name": "English Park", "type": "park", "lat": 40.1748, "lon": 44.5095},
-    {"name": "Lovers' Park", "type": "park", "lat": 40.1895, "lon": 44.5070},
-    {"name": "Circular Park", "type": "park", "lat": 40.1830, "lon": 44.5215},
-    {"name": "Opera & Ballet Theatre", "type": "tourist_attraction", "lat": 40.1848, "lon": 44.5158},
-]
+document.addEventListener('DOMContentLoaded', () => {
+  initClock();
+  initMap();
+  renderPresets();
+  fetchWeather();
+  fetchTraffic();
+  initSearchInput();
+  initGeolocation();
+  setInterval(fetchTraffic, 15000);
+  setInterval(fetchWeather, 60000);
+});
 
-def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
-    if poi_type == "restaurant":
-        if 12 <= hour <= 14:
-            return 0.95
-        if 18 <= hour <= 22:
-            return 1.00
-        if 11 <= hour <= 17:
-            return 0.50
-        return 0.15
-    elif poi_type in ("cafe", "coffee_shop"):
-        if 8 <= hour <= 11:
-            return 1.00
-        if 12 <= hour <= 18:
-            return 0.70
-        if 19 <= hour <= 22:
-            return 0.40
-        return 0.10
-    elif poi_type == "bar":
-        if 20 <= hour <= 23 or 0 <= hour <= 1:
-            return 1.00
-        if 17 <= hour <= 19:
-            return 0.50
-        return 0.05
-    elif poi_type in ("university", "school", "office", "bank", "government"):
-        if is_weekend:
-            return 0.10
-        if 9 <= hour <= 17:
-            return 1.00
-        if hour == 8 or hour == 18:
-            return 0.50
-        return 0.05
-    elif poi_type in ("shopping_centre", "supermarket", "convenience"):
-        if 12 <= hour <= 20:
-            return 1.00
-        if 9 <= hour <= 11 or 21 <= hour <= 22:
-            return 0.55
-        return 0.15
-    elif poi_type in ("hospital", "pharmacy"):
-        return 0.85 if 8 <= hour <= 20 else 0.50
-    elif poi_type in ("museum", "tourist_attraction"):
-        if 10 <= hour <= 18:
-            return 1.00
-        if 19 <= hour <= 21:
-            return 0.35
-        return 0.05
-    elif poi_type in ("metro_station", "bus_station"):
-        if (8 <= hour <= 10) or (17 <= hour <= 19):
-            return 1.00
-        if 10 <= hour <= 16:
-            return 0.60
-        if 20 <= hour <= 23:
-            return 0.30
-        return 0.10
-    elif poi_type == "park":
-        if is_weekend and (11 <= hour <= 20):
-            return 1.00
-        if 17 <= hour <= 21:
-            return 0.80
-        if 11 <= hour <= 16:
-            return 0.45
-        return 0.10
-    elif poi_type == "hotel":
-        if (7 <= hour <= 10) or (16 <= hour <= 21):
-            return 0.90
-        return 0.50
-    return 0.40
+function initClock() {
+  const clockEl = document.getElementById('clock');
+  function tick() {
+    const d = new Date();
+    clockEl.innerText = d.toLocaleTimeString('en-US', { hour12: false });
+  }
+  tick();
+  setInterval(tick, 1000);
+}
 
-_BUSYNESS_CACHE: dict[str, tuple[float, float]] = {}
+function initMap() {
+  map = L.map('map', { zoomControl: false }).setView(CENTER, 15);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-def calculate_destination_busyness(lat: float, lon: float, now: datetime | None = None) -> float:
-    now = now or datetime.now()
-    hour = now.hour
-    is_weekend = now.weekday() >= 5
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    subdomains: 'abcd',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  }).addTo(map);
 
-    cache_key = f"{round(lat, 4)}:{round(lon, 4)}:{hour}:{is_weekend}"
-    now_ts = time.time()
+  loadParkingData();
 
-    if cache_key in _BUSYNESS_CACHE:
-        ts, cached_score = _BUSYNESS_CACHE[cache_key]
-        if now_ts - ts < 300:
-            return cached_score
+  map.on('click', (e) => {
+    if (isAdminMode) return;
+    setDestination(e.latlng.lat, e.latlng.lng, `Custom Pin (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`);
+  });
+}
 
-    total_raw_impact = 0.0
-    search_radius_m = 350.0
+// --------------------------------------------------------------------------
+// Live GPS Location (requests permission once, then tracks continuously
+// while the app is open; independent of the destination pin so searching
+// for / clicking a destination never moves or clears the user's live dot)
+// --------------------------------------------------------------------------
 
-    for poi in FALLBACK_POIS:
-        dist = haversine_m(lat, lon, poi["lat"], poi["lon"])
-        if dist <= search_radius_m:
-            decay = max(0.0, 1.0 - (dist / search_radius_m))
-            weight = POI_WEIGHTS.get(poi["type"], 2)
-            hourly_factor = get_poi_hourly_factor(poi["type"], hour, is_weekend)
-            total_raw_impact += weight * hourly_factor * decay
-
-    normalized_score = min(1.0, round(total_raw_impact / 18.0, 2))
-    _BUSYNESS_CACHE[cache_key] = (now_ts, normalized_score)
-    return normalized_score
-
-
-# --------------------------------------------------------------------------
-# Contextual Factor 2: Real-Time Traffic Integration
-# --------------------------------------------------------------------------
-
-_TRAFFIC_CACHE = {"timestamp": 0.0, "multiplier": 1.0}
-
-def fetch_live_traffic_multiplier() -> float:
-    now_ts = time.time()
-    global _TRAFFIC_CACHE
-    if "_TRAFFIC_CACHE" not in globals():
-        _TRAFFIC_CACHE = {"timestamp": 0, "multiplier": 1.0}
-
-    if now_ts - _TRAFFIC_CACHE["timestamp"] < 180:
-        return _TRAFFIC_CACHE["multiplier"]
-
-    yandex_routing_key = os.environ.get("YANDEX_ROUTING_API_KEY", "a3c71f9f-d1d6-4319-a690-e1866877ac8e")
-    multiplier = 1.0
-
-    try:
-        if yandex_routing_key and yandex_routing_key != "a3c71f9f-d1d6-4319-a690-e1866877ac8e":
-            origin = f"{MAP_CENTER[0]},{MAP_CENTER[1]}"
-            destination = f"{MAP_CENTER[0] + 0.01},{MAP_CENTER[1] + 0.01}"
-            url = f"https://api.routing.yandex.net/v2/route?waypoints={origin}|{destination}&apikey={yandex_routing_key}"
-            
-            req = urllib.request.Request(url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode())
-                if "route" in data and "legs" in data["route"] and len(data["route"]["legs"]) > 0:
-                    weight_data = data["route"]["legs"][0].get("weight", {})
-                    time_normal = weight_data.get("time", {}).get("value", 1)
-                    time_traffic = weight_data.get("time_with_traffic", {}).get("value", time_normal)
-                    if time_normal > 0:
-                        ratio = time_traffic / time_normal
-                        multiplier = max(0.8, min(1.5, ratio))
-    except Exception as exc:
-        print(f"[traffic] Yandex Routing API call skipped/failed ({exc}); using simulated traffic multiplier 1.0.")
-        multiplier = 1.0
-
-    _TRAFFIC_CACHE["multiplier"] = multiplier
-    _TRAFFIC_CACHE["timestamp"] = now_ts
-    return multiplier
-
-
-# --------------------------------------------------------------------------
-# Contextual Factor 3: Real-Time Weather Integration
-# --------------------------------------------------------------------------
-
-_WEATHER_CACHE = {
-    "timestamp": 0.0,
-    "data": {
-        "temp_c": 22.0,
-        "condition": "Clear",
-        "weather_factor": 0.0,
-        "summary": "22°C, Clear",
+function initGeolocation() {
+  if (!('geolocation' in navigator)) {
+    console.warn('Geolocation is not supported in this browser.');
+    return;
+  }
+  // First request triggers the one-time browser permission prompt.
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      updateUserLocation(pos);
+      startWatchingLocation();
     },
+    (err) => {
+      console.warn('Geolocation permission denied or unavailable:', err.message);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
 }
 
-def fetch_live_weather() -> dict:
-    now_ts = time.time()
-    if now_ts - _WEATHER_CACHE["timestamp"] < 600:
-        return _WEATHER_CACHE["data"]
-
-    openweather_key = os.environ.get("944c65db587556cae940016ce322f6d3")
-    weather_info = {
-        "temp_c": 22.0,
-        "condition": "Clear",
-        "weather_factor": 0.0,
-        "summary": "22°C, Clear",
-    }
-
-    try:
-        if openweather_key:
-            url = f"https://api.openweathermap.org/data/2.5/weather?lat={MAP_CENTER[0]}&lon={MAP_CENTER[1]}&appid={openweather_key}&units=metric"
-            req = urllib.request.Request(url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                res = json.loads(resp.read().decode())
-                temp = float(res["main"]["temp"])
-                main_cond = res["weather"][0]["main"] if res.get("weather") else "Clear"
-
-                w_factor = 0.0
-                if "rain" in main_cond.lower() or "drizzle" in main_cond.lower():
-                    w_factor = 0.6
-                elif "snow" in main_cond.lower():
-                    w_factor = 0.8
-                elif temp > 35 or temp < 0:
-                    w_factor = 0.4
-
-                weather_info = {
-                    "temp_c": round(temp, 1),
-                    "condition": main_cond,
-                    "weather_factor": round(w_factor, 2),
-                    "summary": f"{round(temp)}°C, {main_cond}",
-                }
-        else:
-            url = f"https://api.open-meteo.com/v1/forecast?latitude={MAP_CENTER[0]}&longitude={MAP_CENTER[1]}&current_weather=true"
-            req = urllib.request.Request(url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                res = json.loads(resp.read().decode())
-                cw = res.get("current_weather", {})
-                temp = float(cw.get("temperature", 22.0))
-                wcode = int(cw.get("weathercode", 0))
-
-                w_factor = 0.0
-                cond = "Clear"
-                if wcode in (1, 2, 3):
-                    cond = "Cloudy"
-                    w_factor = 0.1
-                elif wcode in range(51, 68) or wcode in range(80, 83):
-                    cond = "Rain"
-                    w_factor = 0.6
-                elif wcode in range(71, 78) or wcode in range(85, 87):
-                    cond = "Snow"
-                    w_factor = 0.8
-                elif wcode >= 95:
-                    cond = "Storm"
-                    w_factor = 0.9
-                elif temp > 35 or temp < 0:
-                    w_factor = 0.4
-
-                weather_info = {
-                    "temp_c": round(temp, 1),
-                    "condition": cond,
-                    "weather_factor": round(w_factor, 2),
-                    "summary": f"{round(temp)}°C, {cond}",
-                }
-    except Exception as exc:
-        print(f"[weather] Live weather API call skipped/failed ({exc}); using neutral weather fallback.")
-
-    _WEATHER_CACHE["timestamp"] = now_ts
-    _WEATHER_CACHE["data"] = weather_info
-    return weather_info
-
-
-# --------------------------------------------------------------------------
-# Data loading: Ground Truth > OSMnx Cache > OSMnx Fetch > Curated Fallback
-# --------------------------------------------------------------------------
-
-def _classify_segment(row: dict) -> str:
-    has_fee = any(
-        row.get(f"parking:{side}:fee") == "yes"
-        for side in ["left", "right", "both", "lane"]
-    )
-    is_ticket = row.get("parking:condition") == "ticket"
-    if row.get("amenity") == "parking":
-        return "lot"
-    if has_fee or is_ticket:
-        return "paid"
-    if any(row.get(f"parking:{side}") == "lane" for side in ["left", "right", "both"]):
-        return "free"
-    return "unspecified"
-
-
-def _linestring_midpoint(coords: list[tuple[float, float]]) -> tuple[float, float]:
-    mid = coords[len(coords) // 2]
-    return mid
-
-
-def _fetch_from_osmnx() -> list[dict]:
-    import osmnx as ox
-
-    gdf = ox.features_from_place(PLACE_NAME, tags=PARKING_TAGS)
-    features = []
-
-    for idx, row in gdf.iterrows():
-        geom = row.geometry
-        if geom is None:
-            continue
-
-        row_dict = row.to_dict()
-        street_name = row_dict.get("name") or row_dict.get("addr:street") or "Unnamed segment"
-        seg_id = hashlib.md5(str(idx).encode()).hexdigest()[:10]
-
-        if geom.geom_type in ("LineString", "MultiLineString"):
-            parking_type = _classify_segment(row_dict)
-            if parking_type == "lot":
-                parking_type = "unspecified"
-
-            if geom.geom_type == "LineString":
-                coords = [(lat, lon) for lon, lat in geom.coords]
-                centroid = _linestring_midpoint(coords)
-                features.append({
-                    "id": seg_id,
-                    "geometry_type": "LineString",
-                    "coordinates": [[lon, lat] for lat, lon in coords],
-                    "centroid": [centroid[1], centroid[0]],
-                    "name": street_name,
-                    "parking_type": parking_type,
-                })
-            else:
-                # IMPORTANT: a MultiLineString is a set of *disconnected* road
-                # pieces (e.g. a street split by an intersection). They must
-                # NOT be concatenated into one flat coordinate list, or the
-                # renderer will draw a spurious straight line connecting the
-                # end of one piece to the start of the next, unrelated piece
-                # (the "spiderweb" artifact). Keep each piece as its own
-                # nested line so the geometry stays a true MultiLineString.
-                lines = [[(lat, lon) for lon, lat in line.coords] for line in geom.geoms]
-                centroid = _linestring_midpoint(lines[0]) if lines else (MAP_CENTER[0], MAP_CENTER[1])
-                features.append({
-                    "id": seg_id,
-                    "geometry_type": "MultiLineString",
-                    "coordinates": [[[lon, lat] for lat, lon in line] for line in lines],
-                    "centroid": [centroid[1], centroid[0]],
-                    "name": street_name,
-                    "parking_type": parking_type,
-                })
-
-        elif geom.geom_type in ("Polygon", "MultiPolygon") and row_dict.get("amenity") == "parking":
-            if geom.geom_type == "Polygon":
-                coords = [(lat, lon) for lon, lat in geom.exterior.coords]
-                rings = [[[lon, lat] for lat, lon in coords]]
-            else:
-                rings = []
-                for poly in geom.geoms:
-                    ring = [(lat, lon) for lon, lat in poly.exterior.coords]
-                    rings.append([[lon, lat] for lat, lon in ring])
-            centroid_point = geom.centroid
-            features.append({
-                "id": seg_id,
-                "geometry_type": "Polygon",
-                "coordinates": rings,
-                "centroid": [centroid_point.x, centroid_point.y],
-                "name": street_name,
-                "parking_type": "lot",
-            })
-
-    if not features:
-        raise RuntimeError("OSMnx returned no usable parking geometry.")
-    return features
-
-
-def _fallback_dataset() -> list[dict]:
-    raw = [
-        ("Northern Avenue", "paid", [
-            [40.1808, 44.5122], [40.1795, 44.5133], [40.1783, 44.5144], [40.1772, 44.5155],
-        ]),
-        ("Abovyan Street", "paid", [
-            [40.1839, 44.5138], [40.1820, 44.5128], [40.1800, 44.5119], [40.1781, 44.5110],
-        ]),
-        ("Mashtots Avenue", "free", [
-            [40.1862, 44.5079], [40.1830, 44.5101], [40.1798, 44.5124], [40.1766, 44.5147],
-        ]),
-        ("Tumanyan Street", "paid", [
-            [40.1858, 44.5057], [40.1841, 44.5093], [40.1824, 44.5129], [40.1807, 44.5165],
-        ]),
-        ("Sayat-Nova Avenue", "free", [
-            [40.1861, 44.5169], [40.1838, 44.5150], [40.1815, 44.5131], [40.1792, 44.5112],
-        ]),
-        ("Komitas Avenue (south)", "unspecified", [
-            [40.1915, 44.4990], [40.1888, 44.5015], [40.1861, 44.5040],
-        ]),
-        ("Baghramyan Avenue", "free", [
-            [40.1868, 44.5028], [40.1846, 44.5065], [40.1824, 44.5102], [40.1802, 44.5139],
-        ]),
-        ("Isahakyan Street", "paid", [
-            [40.1855, 44.5095], [40.1828, 44.5108], [40.1801, 44.5121], [40.1774, 44.5134],
-        ]),
-        ("Pushkin Street", "free", [
-            [40.1830, 44.5065], [40.1812, 44.5097], [40.1794, 44.5129], [40.1776, 44.5161],
-        ]),
-        ("Amiryan Street", "paid", [
-            [40.1835, 44.5147], [40.1812, 44.5138], [40.1789, 44.5129], [40.1766, 44.5120],
-        ]),
-        ("Vazgen Sargsyan Street", "unspecified", [
-            [40.1801, 44.5175], [40.1783, 44.5157], [40.1765, 44.5139], [40.1747, 44.5121],
-        ]),
-        ("Khanjyan Street", "free", [
-            [40.1849, 44.5117], [40.1826, 44.5109], [40.1803, 44.5101], [40.1780, 44.5093],
-        ]),
-        ("Grigor Lusavorich Street", "paid", [
-            [40.1785, 44.5183], [40.1774, 44.5162], [40.1763, 44.5141], [40.1752, 44.5120],
-        ]),
-        ("Teryan Street", "unspecified", [
-            [40.1826, 44.5062], [40.1808, 44.5090], [40.1790, 44.5118], [40.1772, 44.5146],
-        ]),
-        ("Moskovyan Street", "free", [
-            [40.1845, 44.5079], [40.1822, 44.5106], [40.1799, 44.5133], [40.1776, 44.5160],
-        ]),
-    ]
-
-    lots = [
-        ("Republic Square Parking Lot", [
-            [40.1780, 44.5140], [40.1786, 44.5150], [40.1778, 44.5158], [40.1772, 44.5148], [40.1780, 44.5140],
-        ]),
-        ("Opera Complex Parking Lot", [
-            [40.1848, 44.5148], [40.1855, 44.5158], [40.1847, 44.5165], [40.1840, 44.5155], [40.1848, 44.5148],
-        ]),
-        ("Northern Avenue Underground Lot", [
-            [40.1798, 44.5128], [40.1804, 44.5136], [40.1797, 44.5142], [40.1791, 44.5134], [40.1798, 44.5128],
-        ]),
-        ("GUM Market Parking Lot", [
-            [40.1902, 44.5062], [40.1909, 44.5072], [40.1901, 44.5079], [40.1894, 44.5069], [40.1902, 44.5062],
-        ]),
-    ]
-
-    features = []
-    for name, ptype, latlon_coords in raw:
-        seg_id = hashlib.md5(name.encode()).hexdigest()[:10]
-        mid = latlon_coords[len(latlon_coords) // 2]
-        features.append({
-            "id": seg_id,
-            "geometry_type": "LineString",
-            "coordinates": [[lon, lat] for lat, lon in latlon_coords],
-            "centroid": [mid[1], mid[0]],
-            "name": name,
-            "parking_type": ptype,
-        })
-
-    for name, ring in lots:
-        seg_id = hashlib.md5(name.encode()).hexdigest()[:10]
-        lats = [p[0] for p in ring]
-        lons = [p[1] for p in ring]
-        centroid = [sum(lons) / len(lons), sum(lats) / len(lats)]
-        features.append({
-            "id": seg_id,
-            "geometry_type": "Polygon",
-            "coordinates": [[[lon, lat] for lat, lon in ring]],
-            "centroid": centroid,
-            "name": name,
-            "parking_type": "lot",
-        })
-
-    return features
-
-
-def _extract_lat_lon(feature: dict) -> tuple[float, float]:
-    if "centroid" in feature and feature["centroid"]:
-        c0, c1 = feature["centroid"]
-        if 38.0 <= c0 <= 42.0 and 43.0 <= c1 <= 47.0:
-            return float(c0), float(c1)
-        elif 38.0 <= c1 <= 42.0 and 43.0 <= c0 <= 47.0:
-            return float(c1), float(c0)
-
-    geom = feature.get("geometry", {}) if "geometry" in feature else feature
-    props = feature.get("properties", {}) if "properties" in feature else feature
-    
-    if "centroid" in props and props["centroid"]:
-        c0, c1 = props["centroid"]
-        if 38.0 <= c0 <= 42.0 and 43.0 <= c1 <= 47.0:
-            return float(c0), float(c1)
-        elif 38.0 <= c1 <= 42.0 and 43.0 <= c0 <= 47.0:
-            return float(c1), float(c0)
-
-    coords = geom.get("coordinates", [])
-    if not coords:
-        return MAP_CENTER[0], MAP_CENTER[1]
-
-    pts = coords
-    while isinstance(pts, list) and len(pts) > 0 and isinstance(pts[0], list) and len(pts[0]) > 0 and isinstance(pts[0][0], list):
-        pts = pts[0]
-    if isinstance(pts, list) and len(pts) > 0 and isinstance(pts[0], list):
-        pts = pts[0]
-
-    try:
-        avg_0 = sum(p[0] for p in pts) / len(pts)
-        avg_1 = sum(p[1] for p in pts) / len(pts)
-        if 38.0 <= avg_0 <= 42.0:
-            return float(avg_0), float(avg_1)
-        return float(avg_1), float(avg_0)
-    except Exception:
-        return MAP_CENTER[0], MAP_CENTER[1]
-
-
-def _normalize_feature(f: dict) -> dict:
-    props = f.get("properties", {}) if isinstance(f.get("properties"), dict) else f
-    geom = f.get("geometry", {}) if isinstance(f.get("geometry"), dict) else f
-
-    seg_id = str(f.get("id") or props.get("id") or "unk")
-    raw_name = props.get("name") or f.get("name") or "Parking Segment"
-    clean_name = raw_name if isinstance(raw_name, str) else "Unnamed Segment"
-
-    parking_type = props.get("parking_type") or f.get("parking_type") or "free"
-    geom_type = geom.get("type") or f.get("geometry_type") or "LineString"
-    
-    coords = geom.get("coordinates") or f.get("coordinates") or []
-    
-    # Force parse stringified JSON coordinates
-    if isinstance(coords, str):
-        try:
-            coords = json.loads(coords)
-            if isinstance(f.get("geometry"), dict):
-                f["geometry"]["coordinates"] = coords
-            else:
-                f["coordinates"] = coords
-        except Exception:
-            pass
-
-    lat, lon = _extract_lat_lon(f)
-
-    return {
-        "id": seg_id,
-        "geometry_type": geom_type,
-        "coordinates": coords,
-        "centroid": [lon, lat],
-        "name": clean_name,
-        "parking_type": parking_type,
-    }
-
-def load_parking_features(force_refresh: bool = False) -> list[dict]:
-    if not force_refresh and GROUND_TRUTH_FILE.exists():
-        try:
-            raw_features = json.loads(GROUND_TRUTH_FILE.read_text())["features"]
-            features = [_normalize_feature(f) for f in raw_features]
-            print(f"[data] Loaded {len(features)} ground-truth curated segments.")
-            return features
-        except Exception as exc:
-            print(f"[data] Failed to load ground-truth dataset ({exc}). Falling back.")
-
-    if not force_refresh and CACHE_FILE.exists():
-        try:
-            raw_features = json.loads(CACHE_FILE.read_text())["features"]
-            return [_normalize_feature(f) for f in raw_features]
-        except Exception:
-            pass
-
-    try:
-        features = _fetch_from_osmnx()
-        normalized = [_normalize_feature(f) for f in features]
-        CACHE_FILE.write_text(json.dumps({"features": normalized}, ensure_ascii=False))
-        print(f"[data] Loaded {len(normalized)} segments live from OSMnx and cached them.")
-        return normalized
-    except Exception as exc:
-        print(f"[data] OSMnx fetch unavailable ({exc}); using curated offline dataset.")
-        features = _fallback_dataset()
-        normalized = [_normalize_feature(f) for f in features]
-        CACHE_FILE.write_text(json.dumps({"features": normalized, "source": "fallback"}, ensure_ascii=False))
-        return normalized
-
-# Set global store for caching, hydrated below inside app context
-PARKING_FEATURES: list[dict] = []
-
-with app.app_context():
-    db.create_all()
-    
-    # Load parking segments from DB; seed if empty.
-    segments = ParkingSegment.query.all()
-    if not segments:
-        print("[data] PostgreSQL 'parking_segments' table is empty. Seeding initial data...")
-        initial_features = load_parking_features(force_refresh=True)
-        for f in initial_features:
-            lat, lon = _extract_lat_lon(f)
-            seg = ParkingSegment(
-                id=f["id"],
-                name=f["name"],
-                parking_type=f["parking_type"],
-                geometry_type=f["geometry_type"],
-                coordinates=f["coordinates"],
-                centroid_lat=lat,
-                centroid_lon=lon
-            )
-            db.session.add(seg)
-        db.session.commit()
-        PARKING_FEATURES = initial_features
-        print(f"[data] Successfully seeded {len(PARKING_FEATURES)} segments into PostgreSQL.")
-    else:
-        print(f"[data] Loaded {len(segments)} segments from PostgreSQL database.")
-        for s in segments:
-            coords = s.coordinates
-            
-            # Ensure coordinates are a parsed list, not a string
-            if isinstance(coords, str):
-                try:
-                    coords = json.loads(coords)
-                except Exception:
-                    pass
-            
-            c_lat = s.centroid_lat
-            c_lon = s.centroid_lon
-            
-            # Self-heal corrupted centroids that defaulted to MAP_CENTER due to previous errors
-            if c_lat == MAP_CENTER[0] and c_lon == MAP_CENTER[1] and coords:
-                c_lat, c_lon = _extract_lat_lon({"coordinates": coords})
-                
-            PARKING_FEATURES.append({
-                "id": s.id,
-                "name": s.name,
-                "parking_type": s.parking_type,
-                "geometry_type": s.geometry_type,
-                "coordinates": coords,
-                "centroid": [c_lon, c_lat]
-            })
-
-# --------------------------------------------------------------------------
-# Base Simulated Real-Time Traffic / Availability Engine
-# --------------------------------------------------------------------------
-
-def _hour_congestion_curve(hour: int, is_weekend: bool) -> float:
-    if is_weekend:
-        curve = {
-            0: .10, 1: .05, 2: .05, 3: .05, 4: .05, 5: .08, 6: .12, 7: .18,
-            8: .25, 9: .35, 10: .45, 11: .55, 12: .60, 13: .60, 14: .58,
-            15: .55, 16: .55, 17: .60, 18: .68, 19: .72, 20: .68, 21: .55,
-            22: .35, 23: .18,
-        }
-    else:
-        curve = {
-            0: .08, 1: .05, 2: .04, 3: .04, 4: .04, 5: .06, 6: .15, 7: .40,
-            8: .78, 9: .85, 10: .55, 11: .48, 12: .50, 13: .52, 14: .48,
-            15: .50, 16: .58, 17: .80, 18: .90, 19: .82, 20: .60, 21: .38,
-            22: .22, 23: .12,
-        }
-    return curve.get(hour, 0.3)
-
-def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | None = None) -> dict:
-    if parking_type == "unavailable":
-        return {
-            "availability_pct": 0.0,
-            "congestion_score": 0.0,
-            "occupancy_status": "Unavailable",
-            "traffic_level": "N/A",
-        }
-
-    now = now or datetime.now()
-    is_weekend = now.weekday() >= 5
-    base = _hour_congestion_curve(now.hour, is_weekend)
-    next_hour_base = _hour_congestion_curve((now.hour + 1) % 24, is_weekend)
-    frac = now.minute / 60.0
-    congestion_factor = base + (next_hour_base - base) * frac
-
-    seed_key = f"{segment_id}-{now.strftime('%Y%m%d%H%M')}"
-    rng = random.Random(seed_key)
-    jitter = rng.uniform(-9, 9)
-
-    availability_pct = 100 - (congestion_factor * 100) + jitter
-
-    type_adjust = {"free": -6, "paid": 6, "lot": 12, "unspecified": -2}
-    availability_pct += type_adjust.get(parking_type, 0)
-    availability_pct = max(3.0, min(97.0, availability_pct))
-
-    congestion_score = round(100 - availability_pct, 1)
-
-    if availability_pct >= 60:
-        occupancy_status = "Available"
-    elif availability_pct >= 28:
-        occupancy_status = "Filling Fast"
-    else:
-        occupancy_status = "Occupied"
-
-    if congestion_score < 35:
-        traffic_level = "Low"
-    elif congestion_score < 65:
-        traffic_level = "Medium"
-    else:
-        traffic_level = "Heavy"
-
-    return {
-        "availability_pct": round(availability_pct, 1),
-        "congestion_score": congestion_score,
-        "occupancy_status": occupancy_status,
-        "traffic_level": traffic_level,
-    }
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6371000.0
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * R * math.asin(math.sqrt(a))
-
-# --------------------------------------------------------------------------
-# Routes: pages & PWA
-# --------------------------------------------------------------------------
-
-@app.route("/")
-def index():
-    return render_template(
-        "index.html",
-        center_lat=MAP_CENTER[0],
-        center_lon=MAP_CENTER[1],
-        type_colors=TYPE_COLORS,
-    )
-
-@app.route("/manifest.json")
-def pwa_manifest():
-    manifest_data = {
-        "name": "Yerevan Smart Parking Recommender",
-        "short_name": "SmartParking",
-        "description": "Live-simulated curb & lot availability across central Yerevan.",
-        "start_url": "/",
-        "display": "standalone",
-        "background_color": "#14151a",
-        "theme_color": "#14151a",
-        "icons": [
-            {
-                "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/MUTCD_D4-1.svg/192px-MUTCD_D4-1.svg.png",
-                "sizes": "192x192",
-                "type": "image/png"
-            },
-            {
-                "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/MUTCD_D4-1.svg/512px-MUTCD_D4-1.svg.png",
-                "sizes": "512x512",
-                "type": "image/png"
-            }
-        ]
-    }
-    return jsonify(manifest_data)
-
-@app.route("/sw.js")
-def service_worker():
-    js = """
-    const CACHE_NAME = 'yerevan-parking-v1';
-    const urlsToCache = [
-        '/',
-        'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap',
-        'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
-        'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
-        'https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css',
-        'https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js'
-    ];
-
-    self.addEventListener('install', event => {
-        event.waitUntil(
-            caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
-        );
-    });
-
-    self.addEventListener('fetch', event => {
-        event.respondWith(
-            caches.match(event.request).then(response => {
-                if (response) {
-                    return response;
-                }
-                return fetch(event.request);
-            })
-        );
-    });
-    """
-    response = make_response(js)
-    response.headers['Content-Type'] = 'application/javascript'
-    return response
-
-# --------------------------------------------------------------------------
-# Routes: Search & Geocoding Autocomplete API
-# --------------------------------------------------------------------------
-
-@app.route("/api/search")
-def api_search():
-    """
-    Search-as-you-type endpoint for addresses & POIs in Yerevan.
-    Handles typos, fuzzy matching, and exact house numbers (e.g. Mashtots 23/6).
-    Returns [] if no address matches exist.
-    """
-    query = request.args.get("q", "").strip()
-    if not query or len(query) < 2:
-        return jsonify([])
-
-    # Apply synonym/transliteration normalization for common street names
-    normalized_q = query.lower()
-    for syn, target in YEREVAN_STREET_SYNONYMS.items():
-        if syn in normalized_q:
-            normalized_q = normalized_q.replace(syn, target.lower())
-
-    results = []
-    seen_keys = set()
-
-    # 1. Local POIs & Ground-Truth Segments Fuzzy Match
-    for poi in FALLBACK_POIS:
-        p_name = poi["name"]
-        if normalized_q in p_name.lower() or query.lower() in p_name.lower():
-            key = p_name.lower()
-            if key not in seen_keys:
-                seen_keys.add(key)
-                results.append({
-                    "title": p_name,
-                    "subtitle": f"Landmark ({poi['type'].replace('_', ' ').title()}) • Kentron, Yerevan",
-                    "lat": poi["lat"],
-                    "lon": poi["lon"],
-                })
-
-    for f in PARKING_FEATURES:
-        f_name = f.get("name", "")
-        if f_name and f_name != "Unnamed Segment":
-            if normalized_q in f_name.lower() or query.lower() in f_name.lower():
-                key = f_name.lower()
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    lat, lon = _extract_lat_lon(f)
-                    results.append({
-                        "title": f_name,
-                        "subtitle": "Street / Parking Segment • Yerevan",
-                        "lat": lat,
-                        "lon": lon,
-                    })
-
-    # 2. Photon API for fast search-as-you-type and typo tolerance
-    try:
-        search_term = urllib.parse.quote(normalized_q)
-        photon_url = f"https://photon.komoot.io/api/?q={search_term}&lat=40.1792&lon=44.5152&zoom=14&limit=8&bbox=44.40,40.10,44.60,40.25"
-        req = urllib.request.Request(photon_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            data = json.loads(resp.read().decode())
-            for feat in data.get("features", []):
-                props = feat.get("properties", {})
-                coords = feat.get("geometry", {}).get("coordinates", [])
-                if len(coords) == 2:
-                    lon, lat = coords[0], coords[1]
-                    housenumber = props.get("housenumber", "")
-                    street = props.get("street") or props.get("name") or ""
-                    city = props.get("city") or props.get("town") or "Yerevan"
-
-                    if street:
-                        title = f"{street} {housenumber}".strip() if housenumber else street
-                    else:
-                        title = props.get("name", "")
-
-                    if not title:
-                        continue
-
-                    sub_parts = [p for p in [props.get("district"), city, "Armenia"] if p]
-                    subtitle = ", ".join(sub_parts)
-
-                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
-                    if key not in seen_keys and title.lower() not in seen_keys:
-                        seen_keys.add(key)
-                        seen_keys.add(title.lower())
-                        results.append({
-                            "title": title,
-                            "subtitle": subtitle,
-                            "lat": lat,
-                            "lon": lon,
-                        })
-    except Exception as exc:
-        print(f"[search] Photon API call skipped/failed ({exc})")
-
-    # 3. OpenStreetMap Nominatim for exact address/building numbers (e.g., "Mashtots 23/6")
-    if len(results) < 4 or "/" in query or any(char.isdigit() for char in query):
-        try:
-            nom_q = urllib.parse.quote(f"{normalized_q}, Yerevan, Armenia")
-            nom_url = f"https://nominatim.openstreetmap.org/search?q={nom_q}&format=json&limit=5&bounded=0&viewbox=44.40,40.22,44.60,40.12"
-            req = urllib.request.Request(nom_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                data = json.loads(resp.read().decode())
-                for item in data:
-                    lat = float(item["lat"])
-                    lon = float(item["lon"])
-                    display_name = item.get("display_name", "")
-                    parts = [p.strip() for p in display_name.split(",")]
-                    title = ", ".join(parts[:2]) if len(parts) >= 2 else parts[0]
-                    subtitle = ", ".join(parts[2:4]) if len(parts) >= 4 else "Yerevan, Armenia"
-
-                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
-                    if key not in seen_keys and title.lower() not in seen_keys:
-                        seen_keys.add(key)
-                        seen_keys.add(title.lower())
-                        results.append({
-                            "title": title,
-                            "subtitle": subtitle,
-                            "lat": lat,
-                            "lon": lon,
-                        })
-        except Exception as exc:
-            print(f"[search] Nominatim API call skipped/failed ({exc})")
-
-    return jsonify(results[:8])
-
-# --------------------------------------------------------------------------
-# Routes: System APIs
-# --------------------------------------------------------------------------
-
-@app.route("/api/weather")
-def api_weather():
-    return jsonify(fetch_live_weather())
-
-@app.route("/api/parking")
-def api_parking():
-    now = datetime.now()
-    geojson_features = []
-
-    for f in PARKING_FEATURES:
-        state = simulate_segment_state(f["id"], f["parking_type"], now)
-
-        geometry = {"type": f["geometry_type"], "coordinates": f["coordinates"]}
-
-        geojson_features.append({
-            "type": "Feature",
-            "geometry": geometry,
-            "properties": {
-                "id": f["id"],
-                "name": f["name"],
-                "parking_type": f["parking_type"],
-                "color": TYPE_COLORS.get(f["parking_type"], "#7f8c8d"),
-                **state,
-            },
-        })
-
-    return jsonify({
-        "type": "FeatureCollection",
-        "generated_at": now.isoformat(),
-        "features": geojson_features,
-    })
-
-@app.route("/api/traffic")
-def api_traffic():
-    now = datetime.now()
-    by_street: dict[str, list[dict]] = {}
-
-    for f in PARKING_FEATURES:
-        if f["parking_type"] == "unavailable":
-            continue
-        state = simulate_segment_state(f["id"], f["parking_type"], now)
-        by_street.setdefault(f["name"], []).append(state)
-
-    rows = []
-    for name, states in by_street.items():
-        avg_congestion = sum(s["congestion_score"] for s in states) / len(states)
-        avg_availability = sum(s["availability_pct"] for s in states) / len(states)
-        if avg_congestion < 35:
-            level = "Low"
-        elif avg_congestion < 65:
-            level = "Medium"
-        else:
-            level = "Heavy"
-        rows.append({
-            "name": name,
-            "traffic_level": level,
-            "congestion_score": round(avg_congestion, 1),
-            "availability_pct": round(avg_availability, 1),
-        })
-
-    rows.sort(key=lambda r: r["congestion_score"], reverse=True)
-
-    overall_avg = sum(r["congestion_score"] for r in rows) / len(rows) if rows else 0
-    overall_level = "Low" if overall_avg < 35 else ("Medium" if overall_avg < 65 else "Heavy")
-
-    return jsonify({
-        "generated_at": now.isoformat(),
-        "overall_level": overall_level,
-        "overall_congestion_score": round(overall_avg, 1),
-        "streets": rows,
-    })
-
-def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_mult, weather_info):
-    """
-    Core multi-factor recommendation scoring engine. Shared by /api/recommend
-    (interactive UI queries) and the ML feedback logger (to determine whether
-    a logged parking spot matches one of the app's recommended candidates).
-
-    Returns (candidates, current_radius) where candidates is the full sorted
-    list of scored, in-radius parking options (best first).
-    """
-    weather_factor = weather_info["weather_factor"]
-    candidates = []
-    current_radius = requested_radius
-
-    for current_radius in [requested_radius, 1500.0, 3000.0]:
-        candidates = []
-        for f in PARKING_FEATURES:
-            if f.get("parking_type") == "unavailable":
-                continue
-
-            lat, lon = _extract_lat_lon(f)
-            distance_m = haversine_m(dest_lat, dest_lon, lat, lon)
-            if distance_m > current_radius:
-                continue
-
-            segment_id = f.get("id", f.get("properties", {}).get("id", "unk"))
-            parking_type = f.get("parking_type", f.get("properties", {}).get("parking_type", "curbside"))
-            
-            state = simulate_segment_state(segment_id, parking_type, now)
-            dest_busyness = calculate_destination_busyness(lat, lon, now)
-
-            adjusted_congestion = min(100.0, state["congestion_score"] * traffic_mult)
-            traffic_factor = round(adjusted_congestion / 100.0, 2)
-
-            adjusted_avail = max(3.0, min(97.0, state["availability_pct"] - (dest_busyness * 20.0) - (weather_factor * 6.0)))
-
-            busyness_component = (1.0 - dest_busyness) * 25.0
-            avail_component = (adjusted_avail / 100.0) * 20.0
-            type_weight = TYPE_BASE_WEIGHT.get(parking_type, 45)
-            type_component = (type_weight / 100.0) * 10.0
-            traffic_component = (1.0 - traffic_factor) * 8.0
-            distance_component = max(0.0, 1.0 - (distance_m / current_radius)) * 35.0
-            weather_component = (1.0 - weather_factor) * 2.0
-
-            final_score = round(
-                busyness_component + avail_component + type_component + traffic_component + distance_component + weather_component,
-                1,
-            )
-
-            busyness_level = "High" if dest_busyness >= 0.65 else ("Moderate" if dest_busyness >= 0.35 else "Low")
-            traffic_level_label = "High" if traffic_factor >= 0.65 else ("Moderate" if traffic_factor >= 0.35 else "Low")
-            weather_level_label = "High" if weather_factor >= 0.6 else ("Moderate" if weather_factor >= 0.3 else "Low")
-
-            occ_status = "Available" if adjusted_avail >= 60 else ("Filling Fast" if adjusted_avail >= 28 else "Occupied")
-
-            raw_name = f.get("name", f.get("properties", {}).get("name", "Parking Segment"))
-            clean_name = raw_name if isinstance(raw_name, str) else "Unnamed Segment"
-
-            candidates.append({
-                "id": segment_id,
-                "name": clean_name,
-                "parking_type": parking_type,
-                "color": TYPE_COLORS.get(parking_type, "#7f8c8d"),
-                "location": {"lat": lat, "lon": lon},
-                "distance_m": round(distance_m, 1),
-                "walk_time_min": max(1, round(distance_m / 80)),
-                "score": final_score,
-                "final_score": final_score,
-                "availability_pct": round(adjusted_avail, 1),
-                "congestion_score": round(adjusted_congestion, 1),
-                "occupancy_status": occ_status,
-                "traffic_level": state["traffic_level"],
-                "destination_busyness": dest_busyness,
-                "destination_busyness_level": busyness_level,
-                "traffic_factor": traffic_factor,
-                "traffic_impact_level": traffic_level_label,
-                "weather_factor": weather_factor,
-                "weather_impact_level": weather_level_label,
-                "weather_summary": weather_info["summary"],
-            })
-
-        if candidates:
-            break
-
-    candidates.sort(key=lambda c: c["final_score"], reverse=True)
-    return candidates, current_radius
-
-@app.route("/api/recommend")
-def api_recommend():
-    try:
-        dest_lat = float(request.args.get("lat"))
-        dest_lon = float(request.args.get("lon"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Query params 'lat' and 'lon' are required and must be numeric."}), 400
-
-    requested_radius = float(request.args.get("radius", 500))
-    now = datetime.now()
-
-    traffic_mult = fetch_live_traffic_multiplier()
-    weather_info = fetch_live_weather()
-
-    candidates, current_radius = _compute_recommendations(
-        dest_lat, dest_lon, requested_radius, now, traffic_mult, weather_info
-    )
-    top3 = candidates[:3]
-
-    return jsonify({
-        "destination": {"lat": dest_lat, "lon": dest_lon},
-        "radius_m": current_radius,
-        "generated_at": now.isoformat(),
-        "candidates_considered": len(candidates),
-        "weather": weather_info,
-        "live_traffic_multiplier": traffic_mult,
-        "recommendations": top3,
-    })
-
-
-# Loose bounding box around Kentron, Yerevan. Any admin-submitted point
-# outside this box is almost certainly a typo (swapped lat/lon, pasted
-# coordinates from the wrong place, etc.) and would otherwise get written
-# straight into the shared PostgreSQL table and corrupt the map for every
-# user. +/- ~0.08 deg (~8km) gives comfortable room around the city center.
-MAP_BOUNDS = {
-    "lat_min": MAP_CENTER[0] - 0.08, "lat_max": MAP_CENTER[0] + 0.08,
-    "lon_min": MAP_CENTER[1] - 0.08, "lon_max": MAP_CENTER[1] + 0.08,
+function startWatchingLocation() {
+  if (geoWatchId !== null) return;
+  geoWatchId = navigator.geolocation.watchPosition(
+    updateUserLocation,
+    (err) => console.warn('Geolocation watch error:', err.message),
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+  );
 }
 
+function updateUserLocation(pos) {
+  userLat = pos.coords.latitude;
+  userLon = pos.coords.longitude;
 
-def _all_points(coordinates, geometry_type: str):
-    """Flatten a GeoJSON coordinates array (LineString/Polygon/MultiLineString) into a flat list of [lon, lat] points."""
-    pts = []
-    def walk(node):
-        if not isinstance(node, list):
-            return
-        if len(node) == 2 and all(isinstance(v, (int, float)) for v in node):
-            pts.append(node)
-            return
-        for child in node:
-            walk(child)
-    walk(coordinates)
-    return pts
+  if (userMarker) {
+    userMarker.setLatLng([userLat, userLon]);
+  } else {
+    const userIcon = L.divIcon({
+      className: 'user-marker-wrap',
+      html: '<div class="user-location-pulse"></div><div class="user-location-marker"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+    userMarker = L.marker([userLat, userLon], { icon: userIcon, zIndexOffset: 400 }).addTo(map);
+    userMarker.bindPopup('<div style="font-family:\'Inter\',sans-serif; color:#14151a;"><strong>Your location</strong></div>');
+  }
 
+  // Only auto-center the map on the very first GPS fix, so the user can
+  // freely pan/search afterwards without the map jumping back to them.
+  if (!hasCenteredOnUser) {
+    hasCenteredOnUser = true;
+    map.setView([userLat, userLon], 16);
+  }
+}
 
-def _validate_feature_coordinates(coordinates, geometry_type: str) -> str | None:
-    """Returns an error message if any point falls outside the Kentron/Yerevan area, else None."""
-    pts = _all_points(coordinates, geometry_type)
-    if not pts:
-        return "No coordinates supplied."
-    for lon, lat in pts:
-        if not (MAP_BOUNDS["lat_min"] <= lat <= MAP_BOUNDS["lat_max"] and
-                MAP_BOUNDS["lon_min"] <= lon <= MAP_BOUNDS["lon_max"]):
-            return (f"Point [lon={lon}, lat={lat}] is outside the expected Yerevan/Kentron area "
-                    f"(lat {MAP_BOUNDS['lat_min']:.4f}..{MAP_BOUNDS['lat_max']:.4f}, "
-                    f"lon {MAP_BOUNDS['lon_min']:.4f}..{MAP_BOUNDS['lon_max']:.4f}). "
-                    "Check for a swapped lat/lon or a typo before saving.")
-    return None
+// --------------------------------------------------------------------------
+// Address Search Bar & Autocomplete Logic
+// --------------------------------------------------------------------------
 
+function initSearchInput() {
+  const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  const searchDropdown = document.getElementById('search-dropdown');
 
-@app.route("/api/admin/feature", methods=["POST"])
-def api_admin_save_feature():
-    global PARKING_FEATURES
-    data = request.json
-    if not data:
-        return jsonify({"error": "Invalid or empty payload."}), 400
+  searchInput.addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    if (val.length > 0) {
+      searchClearBtn.classList.remove('hidden');
+    } else {
+      searchClearBtn.classList.add('hidden');
+      searchDropdown.classList.add('hidden');
+      return;
+    }
 
-    normalized = _normalize_feature(data)
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      fetchSearchResults(val);
+    }, 220);
+  });
 
-    # Automatically generate an ID if the frontend passes an un-saved segment
-    if not normalized["id"] or normalized["id"] == "unk":
-        normalized["id"] = hashlib.md5(str(time.time()).encode()).hexdigest()[:10]
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const firstItem = searchDropdown.querySelector('.search-item');
+      if (firstItem) {
+        firstItem.click();
+      }
+    } else if (e.key === 'Escape') {
+      searchDropdown.classList.add('hidden');
+    }
+  });
 
-    # Reject out-of-area coordinates before they ever touch the shared DB.
-    validation_error = _validate_feature_coordinates(normalized["coordinates"], normalized["geometry_type"])
-    if validation_error:
-        return jsonify({"error": validation_error}), 400
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('search-bar-wrap').contains(e.target)) {
+      searchDropdown.classList.add('hidden');
+    }
+  });
+}
 
-    lat, lon = _extract_lat_lon(normalized)
+function clearSearchInput() {
+  const searchInput = document.getElementById('search-input');
+  const searchClearBtn = document.getElementById('search-clear-btn');
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchInput.value = '';
+  searchClearBtn.classList.add('hidden');
+  searchDropdown.classList.add('hidden');
+  searchInput.focus();
+}
 
-    # --- Database Persistence (Prevents ephemeral loss on server reload) ---
-    segment = ParkingSegment.query.get(normalized["id"])
-    if segment:
-        segment.name = normalized["name"]
-        segment.parking_type = normalized["parking_type"]
-        segment.geometry_type = normalized["geometry_type"]
-        segment.coordinates = normalized["coordinates"]
-        segment.centroid_lat = lat
-        segment.centroid_lon = lon
-        updated = True
-    else:
-        segment = ParkingSegment(
-            id=normalized["id"],
-            name=normalized["name"],
-            parking_type=normalized["parking_type"],
-            geometry_type=normalized["geometry_type"],
-            coordinates=normalized["coordinates"],
-            centroid_lat=lat,
-            centroid_lon=lon
-        )
-        db.session.add(segment)
-        updated = False
+async function fetchSearchResults(query) {
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    const results = await resp.json();
+    renderSearchDropdown(results);
+  } catch (err) {
+    console.error('Search error:', err);
+  }
+}
 
-    db.session.commit()
+function renderSearchDropdown(results) {
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchDropdown.innerHTML = '';
 
-    # --- In-memory Update ---
-    for i, f in enumerate(PARKING_FEATURES):
-        if f["id"] == normalized["id"]:
-            PARKING_FEATURES[i] = normalized
-            break
-    else:
-        PARKING_FEATURES.append(normalized)
+  if (!results || results.length === 0) {
+    searchDropdown.innerHTML = '<div class="search-no-results">No matching locations found</div>';
+    searchDropdown.classList.remove('hidden');
+    return;
+  }
 
-    return jsonify({
-        "status": "ok",
-        "action": "updated" if updated else "created",
-        "id": normalized["id"],
-        "total_segments": len(PARKING_FEATURES),
-        "parking_type_saved": normalized["parking_type"]
+  results.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'search-item';
+    div.innerHTML = `
+      <div class="search-item-title">${escapeHtml(item.title)}</div>
+      <div class="search-item-sub">${escapeHtml(item.subtitle)}</div>
+    `;
+    div.onclick = () => {
+      selectSearchLocation(item);
+    };
+    searchDropdown.appendChild(div);
+  });
+
+  searchDropdown.classList.remove('hidden');
+}
+
+function selectSearchLocation(item) {
+  const searchInput = document.getElementById('search-input');
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchInput.value = item.title;
+  searchDropdown.classList.add('hidden');
+
+  map.setView([item.lat, item.lon], 16);
+  setDestination(item.lat, item.lon, item.title);
+}
+
+// --------------------------------------------------------------------------
+// Core Parking & Recommender Engine Interactions
+// --------------------------------------------------------------------------
+
+function loadParkingData() {
+  if (parkingLayer) map.removeLayer(parkingLayer);
+
+  fetch('/api/parking')
+    .then(r => r.json())
+    .then(data => {
+      const features = [];
+      const rawData = Array.isArray(data) ? data : (data.features || []);
+
+      rawData.forEach(item => {
+        let coords = item.coordinates || (item.geometry && item.geometry.coordinates);
+        let type = item.geometry_type || (item.geometry && item.geometry.type) || 'LineString';
+
+        if (!coords || coords.length === 0) return;
+
+        // 1. Fix Flat 1D Arrays (if backend sends [lat, lon, lat, lon])
+        if (typeof coords[0] === 'number') {
+          const paired = [];
+          for (let i = 0; i < coords.length; i += 2) {
+            paired.push([coords[i], coords[i+1]]);
+          }
+          coords = paired;
+        }
+
+        // 2. Fix Lat/Lon Inversion (GeoJSON strictly requires [Lon, Lat])
+        // Yerevan is roughly Lat 40.1, Lon 44.5. 
+        const normalizePoint = (pt) => {
+          // If the first coordinate is ~40, it's Latitude. Swap to [Lon, Lat].
+          if (pt[0] > 39 && pt[0] < 42 && pt[1] > 43 && pt[1] < 46) {
+            return [pt[1], pt[0]];
+          }
+          return pt;
+        };
+
+        if (type === 'LineString') {
+          coords = coords.map(normalizePoint);
+        } else if (type === 'Polygon' || type === 'MultiLineString') {
+          coords = coords.map(ring => ring.map(normalizePoint));
+        }
+
+        features.push({
+          type: "Feature",
+          properties: item.properties || item,
+          geometry: {
+            type: type,
+            coordinates: coords
+          }
+        });
+      });
+
+      parkingLayer = L.geoJSON({ type: "FeatureCollection", features: features }, {
+        style: (feature) => ({
+          color: feature.properties.color || '#7f8c8d',
+          weight: feature.geometry.type.includes('Polygon') ? 2 : 5,
+          opacity: 0.85,
+          fillColor: feature.properties.color || '#7f8c8d',
+          fillOpacity: 0.35
+        }),
+        onEachFeature: (feature, layer) => {
+          const props = feature.properties;
+          layer.bindPopup(`
+            <div style="font-family:'Inter',sans-serif; color:#14151a;">
+              <strong style="font-size:14px; font-weight:700;">${escapeHtml(props.name || 'Segment')}</strong><br/>
+              <span style="font-size:12px; color:#555;">Type: <b>${TYPE_LABEL[props.parking_type] || props.parking_type || 'Unspecified'}</b></span><br/>
+              <span style="font-size:12px; color:#555;">Availability: <b>${props.availability_pct || '--'}%</b></span><br/>
+              <span style="font-size:12px; color:#555;">Traffic Level: <b>${props.traffic_level || '--'}</b></span>
+            </div>
+          `);
+
+          if (isAdminMode) {
+            layer.on('click', (e) => {
+              L.DomEvent.stopPropagation(e);
+              openAdminModal(feature);
+            });
+          }
+        }
+      }).addTo(map);
     })
+    .catch(err => console.error("Error loading parking data:", err));
+}
 
-# --------------------------------------------------------------------------
-# Machine Learning Feedback Logging Endpoint
-# --------------------------------------------------------------------------
-@app.route('/api/admin/ml_feedback', methods=['POST'])
-def log_ml_feedback():
-    data = request.get_json()
-    
-    # Validate payload coordinates
-    if not data or 'lat' not in data or 'lon' not in data:
-        return jsonify({"error": "Missing location data ('lat' and 'lon' required)."}), 400
+function renderPresets() {
+  const grid = document.getElementById('presets');
+  grid.innerHTML = '';
+  PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.innerText = p.name;
+    btn.onclick = () => {
+      map.setView([p.lat, p.lon], 16);
+      setDestination(p.lat, p.lon, p.name);
+    };
+    grid.appendChild(btn);
+  });
+}
 
-    try:
-        user_lat = float(data['lat'])
-        user_lon = float(data['lon'])
-    except (ValueError, TypeError):
-        return jsonify({"error": "Invalid coordinate values."}), 400
+function setDestination(lat, lon, label) {
+  currentDest = { lat, lon, label };
 
-    dest_lat = None
-    dest_lon = None
-    if 'dest_lat' in data and 'dest_lon' in data:
-        try:
-            dest_lat = float(data['dest_lat'])
-            dest_lon = float(data['dest_lon'])
-        except (ValueError, TypeError):
-            dest_lat = None
-            dest_lon = None
+  if (destMarker) map.removeLayer(destMarker);
 
-    # 1. Capture current UTC timestamp and local temporal context
-    utc_now = datetime.utcnow()
-    local_now = datetime.now()
-    hour = local_now.hour
-    day_of_week = local_now.weekday()
-    is_weekend = day_of_week >= 5
+  const destIcon = L.divIcon({
+    className: 'dest-marker-wrap',
+    html: '<div class="dest-marker"></div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  });
 
-    # 2. Perform nearest parking segment matching
-    closest_segment = None
-    min_distance_m = float('inf')
+  destMarker = L.marker([lat, lon], { icon: destIcon }).addTo(map);
 
-    for f in PARKING_FEATURES:
-        f_lat, f_lon = _extract_lat_lon(f)
-        dist = haversine_m(user_lat, user_lon, f_lat, f_lon)
-        if dist < min_distance_m:
-            min_distance_m = dist
-            closest_segment = f
+  document.getElementById('destination-active').style.display = 'block';
+  document.getElementById('dest-coords').innerText = `${label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
 
-    matched_seg_id = closest_segment.get("id") if closest_segment else None
-    matched_parking_type = closest_segment.get("parking_type", "unspecified") if closest_segment else "unspecified"
+  fetchRecommendations(lat, lon);
+}
 
-    # 3. Snapshot live environment, traffic, and destination busyness
-    busyness_score = calculate_destination_busyness(user_lat, user_lon, local_now)
-    traffic_mult = fetch_live_traffic_multiplier()
-    weather = fetch_live_weather()
+function clearDestination() {
+  currentDest = null;
+  if (destMarker) map.removeLayer(destMarker);
+  recMarkers.forEach(m => map.removeLayer(m));
+  recMarkers = [];
 
-    # 4. Derive baseline simulated state for the matched segment
-    simulated_avail = None
-    simulated_cong = None
-    if matched_seg_id:
-        sim_state = simulate_segment_state(matched_seg_id, matched_parking_type, local_now)
-        simulated_avail = sim_state.get("availability_pct")
-        simulated_cong = sim_state.get("congestion_score")
+  document.getElementById('destination-active').style.display = 'none';
+  document.getElementById('rec-list').innerHTML = `
+    <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
+  `;
+}
 
-    distance_parking_to_destination_m = None
-    parked_at_recommended = None
-    recommended_rank_matched = None
-    distance_to_nearest_recommendation_m = None
+function fetchRecommendations(lat, lon) {
+  fetch(`/api/recommend?lat=${lat}&lon=${lon}`)
+    .then(r => r.json())
+    .then(data => {
+      renderRecommendations(data.recommendations);
+    });
+}
 
-    if dest_lat is not None and dest_lon is not None:
-        distance_parking_to_destination_m = round(haversine_m(user_lat, user_lon, dest_lat, dest_lon), 2)
+function renderRecommendations(recs) {
+  recMarkers.forEach(m => map.removeLayer(m));
+  recMarkers = [];
 
-        rec_candidates, _ = _compute_recommendations(dest_lat, dest_lon, 500.0, local_now, traffic_mult, weather)
-        top3 = rec_candidates[:3]
+  const container = document.getElementById('rec-list');
+  container.innerHTML = '';
 
-        if top3:
-            parked_at_recommended = False
-            best_distance = float('inf')
-            for rank, cand in enumerate(top3, start=1):
-                cand_dist = haversine_m(user_lat, user_lon, cand["location"]["lat"], cand["location"]["lon"])
-                if cand_dist < best_distance:
-                    best_distance = cand_dist
-                is_match = cand_dist <= RECOMMENDATION_MATCH_RADIUS_M or cand["id"] == matched_seg_id
-                if is_match and not parked_at_recommended:
-                    parked_at_recommended = True
-                    recommended_rank_matched = rank
-            distance_to_nearest_recommendation_m = round(best_distance, 2)
+  if (!recs || recs.length === 0) {
+    container.innerHTML = '<div id="rec-empty">No parking options available near this destination.</div>';
+    return;
+  }
 
-    # 6. Persist comprehensive feature record to PostgreSQL
-    new_entry = MLFeedback(
-        lat=user_lat,
-        lon=user_lon,
-        timestamp=utc_now,
-        hour=hour,
-        day_of_week=day_of_week,
-        is_weekend=is_weekend,
-        matched_segment_id=matched_seg_id,
-        parking_type=matched_parking_type,
-        distance_to_segment_m=round(min_distance_m, 2) if min_distance_m != float('inf') else None,
-        destination_busyness=busyness_score,
-        traffic_multiplier=traffic_mult,
-        weather_condition=weather.get("condition"),
-        weather_factor=weather.get("weather_factor"),
-        temp_c=weather.get("temp_c"),
-        simulated_availability_pct=simulated_avail,
-        simulated_congestion_score=simulated_cong,
-        dest_lat=dest_lat,
-        dest_lon=dest_lon,
-        distance_parking_to_destination_m=distance_parking_to_destination_m,
-        parked_at_recommended_spot=parked_at_recommended,
-        recommended_rank_matched=recommended_rank_matched,
-        distance_to_nearest_recommendation_m=distance_to_nearest_recommendation_m,
-    )
+  recs.forEach((r, idx) => {
+    const rank = idx + 1;
+    const markerIcon = L.divIcon({
+      className: 'rec-marker-wrap',
+      html: `<div class="rec-marker"><span>${rank}</span></div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 26]
+    });
 
-    db.session.add(new_entry)
-    db.session.commit()
-    
-    return jsonify({
-        "status": "success",
-        "id": new_entry.id,
-        "matched_segment": matched_seg_id,
-        "parked_at_recommended_spot": parked_at_recommended,
-        "recommended_rank_matched": recommended_rank_matched,
-        "distance_to_nearest_recommendation_m": distance_to_nearest_recommendation_m
-    }), 201
+    const m = L.marker([r.location.lat, r.location.lon], { icon: markerIcon }).addTo(map);
+    m.bindPopup(`
+      <div style="font-family:'Inter',sans-serif; color:#14151a;">
+        <strong>#${rank} ${escapeHtml(r.name)}</strong><br/>
+        Score: <b>${r.final_score}</b> / 100<br/>
+        Distance: ${r.distance_m}m (${r.walk_time_min} min walk)
+      </div>
+    `);
+    recMarkers.push(m);
 
+    const card = document.createElement('div');
+    card.className = 'rec-card';
+    card.onclick = () => {
+      map.setView([r.location.lat, r.location.lon], 17);
+      m.openPopup();
+    };
 
-if __name__ == "__main__":
-    print("[server] Starting Yerevan Smart Parking Recommender server on http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    const pillClass = `pill-${r.parking_type}`;
+
+    card.innerHTML = `
+      <div class="rec-rank">${rank}</div>
+      <div class="rec-body">
+        <div class="rec-name">${escapeHtml(r.name)}</div>
+        <div class="rec-meta">
+          <span class="pill ${pillClass}">${TYPE_LABEL[r.parking_type] || r.parking_type}</span>
+          <span>${r.distance_m}m</span>
+          <span>&bull;</span>
+          <span>~${r.walk_time_min}m walk</span>
+        </div>
+      </div>
+      <div class="gauge" style="background: conic-gradient(var(--apricot) ${r.final_score}%, var(--basalt-700) 0)">
+        <div class="gauge-inner">${r.final_score}</div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function fetchWeather() {
+  fetch('/api/weather')
+    .then(r => r.json())
+    .then(w => {
+      document.getElementById('weather-display').innerText = w.summary || `${w.temp_c}°C, ${w.condition}`;
+    });
+}
+
+function fetchTraffic() {
+  fetch('/api/traffic')
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('overall-level').innerText = data.overall_level;
+      const container = document.getElementById('traffic-list');
+      container.innerHTML = '';
+      (data.streets || []).slice(0, 8).forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'traffic-card';
+        row.innerHTML = `
+          <span class="traffic-name">${escapeHtml(s.name)}</span>
+          <span class="traffic-badge badge-${s.traffic_level}">${s.traffic_level}</span>
+        `;
+        container.appendChild(row);
+      });
+    });
+}
+
+function toggleMobileSheet() {
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('sheet-collapsed');
+}
+
+// --------------------------------------------------------------------------
+// Admin Curation & ML Feedback Logic
+// --------------------------------------------------------------------------
+
+function toggleAdminMode() {
+  isAdminMode = !isAdminMode;
+  const btn = document.getElementById('admin-toggle');
+  if (isAdminMode) {
+    btn.classList.add('active');
+    btn.innerText = 'Exit Curation Mode';
+    if (map.pm) {
+      map.pm.addControls({ position: 'topright', drawCircle: false, drawMarker: false });
+      map.on('pm:create', onGeomanCreate);
+    }
+  } else {
+    btn.classList.remove('active');
+    btn.innerText = 'Admin / Curation Mode';
+    if (map.pm) {
+      map.pm.removeControls();
+      map.off('pm:create', onGeomanCreate);
+    }
+    closeAdminModal();
+  }
+  loadParkingData();
+}
+
+function onGeomanCreate(e) {
+  const layer = e.layer;
+  const geojson = layer.toGeoJSON();
+  openAdminModal({
+    properties: { id: 'seg_' + Date.now(), name: '', parking_type: 'free' },
+    geometry: geojson.geometry
+  });
+}
+
+async function logMLFeedback() {
+  const btn = document.getElementById('ml-log-toggle');
+  if (btn) btn.disabled = true;
+
+  // Helper function to transmit payload to Flask backend
+  async function sendMLData(lat, lon) {
+    try {
+      const payload = {
+        lat: parseFloat(lat),
+        lon: parseFloat(lon),
+        dest_lat: currentDest ? currentDest.lat : null,
+        dest_lon: currentDest ? currentDest.lon : null
+      };
+
+      const response = await fetch('/api/admin/ml_feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      // 1. Fetch raw text first to handle non-JSON HTML server responses safely
+      const rawText = await response.text();
+      let resData;
+
+      try {
+        resData = JSON.parse(rawText);
+      } catch (e) {
+        // Triggered if Flask or Render returns HTML (404/500/502)
+        throw new Error(`Server returned HTML/plain text (${response.status}): ${rawText.substring(0, 120)}...`);
+      }
+
+      // 2. Handle JSON response
+      if (response.ok) {
+        alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
+      } else {
+        alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
+      }
+    } catch (err) {
+      alert(`Network Error: ${err.message}`);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // 1. Fallback if browser lacks geolocation capability
+  if (!navigator.geolocation) {
+    alert("Geolocation unsupported on this browser. Logging map center location instead.");
+    const center = map.getCenter();
+    return sendMLData(center.lat, center.lng);
+  }
+
+  // 2. Execute GPS lookup with explicit error callback and timeout limits
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      sendMLData(position.coords.latitude, position.coords.longitude);
+    },
+    (error) => {
+      console.warn("GPS Location error:", error);
+      alert(`Location access failed (${error.message}). Logging current map center coordinates as fallback.`);
+      const center = map.getCenter();
+      sendMLData(center.lat, center.lng);
+    },
+    {
+      enableHighAccuracy: false, // Set to false on mobile to prevent GPS hardware timeouts
+      timeout: 8000,
+      maximumAge: 10000
+    }
+  );
+}
+
+function openAdminModal(feature) {
+  const props = feature.properties || feature;
+  const geom = feature.geometry || {};
+  
+  document.getElementById('edit-id').value = props.id || '';
+  document.getElementById('edit-name').value = props.name || '';
+  document.getElementById('edit-type').value = props.parking_type || 'free';
+  document.getElementById('edit-geom-type').value = geom.type || 'LineString';
+  document.getElementById('edit-coords').value = geom.coordinates ? JSON.stringify(geom.coordinates) : '';
+
+  document.getElementById('admin-modal').classList.remove('hidden');
+}
+
+function closeAdminModal() {
+  document.getElementById('admin-modal').classList.add('hidden');
+}
+
+function saveAdminFeature() {
+  const id = document.getElementById('edit-id').value || 'seg_' + Date.now();
+  const name = document.getElementById('edit-name').value || 'New Segment';
+  const parkingType = document.getElementById('edit-type').value;
+  const geomType = document.getElementById('edit-geom-type').value || 'LineString';
+  const coordsRaw = document.getElementById('edit-coords').value;
+
+  let coords;
+  try {
+    coords = coordsRaw ? JSON.parse(coordsRaw) : [[44.5122, 40.1808], [44.5133, 40.1795]];
+  } catch (e) {
+    coords = [[44.5122, 40.1808], [44.5133, 40.1795]];
+  }
+
+  const payload = {
+    id: id,
+    name: name,
+    parking_type: parkingType,
+    geometry_type: geomType,
+    coordinates: coords
+  };
+
+  fetch('/api/admin/feature', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json().then(body => ({ ok: r.ok, body })))
+  .then(({ ok, body }) => {
+    if (!ok) {
+      alert(body.error || 'Could not save this segment.');
+      return;
+    }
+    closeAdminModal();
+    loadParkingData();
+  })
+  .catch(err => console.error('Error saving feature:', err));
+}
+
+function deleteAdminFeature() {
+  const id = document.getElementById('edit-id').value;
+  if (!id) {
+    closeAdminModal();
+    return;
+  }
+  
+  fetch(`/api/admin/feature/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  })
+  .then(r => r.json().then(body => ({ ok: r.ok, body })))
+  .then(({ ok, body }) => {
+    if (!ok) {
+      alert(body.error || 'Could not delete this segment.');
+      return;
+    }
+    closeAdminModal();
+    loadParkingData();
+  })
+  .catch(err => {
+    console.error('Error deleting feature:', err);
+    closeAdminModal();
+  });
+}
+</script>
+</body>
+</html>

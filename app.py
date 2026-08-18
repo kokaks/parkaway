@@ -518,24 +518,39 @@ def _fetch_from_osmnx() -> list[dict]:
         seg_id = hashlib.md5(str(idx).encode()).hexdigest()[:10]
 
         if geom.geom_type in ("LineString", "MultiLineString"):
-            if geom.geom_type == "LineString":
-                coords = [(lat, lon) for lon, lat in geom.coords]
-            else:
-                coords = []
-                for line in geom.geoms:
-                    coords.extend([(lat, lon) for lon, lat in line.coords])
             parking_type = _classify_segment(row_dict)
             if parking_type == "lot":
                 parking_type = "unspecified"
-            centroid = _linestring_midpoint(coords)
-            features.append({
-                "id": seg_id,
-                "geometry_type": "LineString",
-                "coordinates": [[lon, lat] for lat, lon in coords],
-                "centroid": [centroid[1], centroid[0]],
-                "name": street_name,
-                "parking_type": parking_type,
-            })
+
+            if geom.geom_type == "LineString":
+                coords = [(lat, lon) for lon, lat in geom.coords]
+                centroid = _linestring_midpoint(coords)
+                features.append({
+                    "id": seg_id,
+                    "geometry_type": "LineString",
+                    "coordinates": [[lon, lat] for lat, lon in coords],
+                    "centroid": [centroid[1], centroid[0]],
+                    "name": street_name,
+                    "parking_type": parking_type,
+                })
+            else:
+                # IMPORTANT: a MultiLineString is a set of *disconnected* road
+                # pieces (e.g. a street split by an intersection). They must
+                # NOT be concatenated into one flat coordinate list, or the
+                # renderer will draw a spurious straight line connecting the
+                # end of one piece to the start of the next, unrelated piece
+                # (the "spiderweb" artifact). Keep each piece as its own
+                # nested line so the geometry stays a true MultiLineString.
+                lines = [[(lat, lon) for lon, lat in line.coords] for line in geom.geoms]
+                centroid = _linestring_midpoint(lines[0]) if lines else (MAP_CENTER[0], MAP_CENTER[1])
+                features.append({
+                    "id": seg_id,
+                    "geometry_type": "MultiLineString",
+                    "coordinates": [[[lon, lat] for lat, lon in line] for line in lines],
+                    "centroid": [centroid[1], centroid[0]],
+                    "name": street_name,
+                    "parking_type": parking_type,
+                })
 
         elif geom.geom_type in ("Polygon", "MultiPolygon") and row_dict.get("amenity") == "parking":
             if geom.geom_type == "Polygon":
@@ -600,7 +615,7 @@ def _fallback_dataset() -> list[dict]:
             [40.1849, 44.5117], [40.1826, 44.5109], [40.1803, 44.5101], [40.1780, 44.5093],
         ]),
         ("Grigor Lusavorich Street", "paid", [
-            [40.1785, 44.5183], [40.1798, 44.5162], [40.1711, 44.5141], [40.1824, 44.5120],
+            [40.1785, 44.5183], [40.1774, 44.5162], [40.1763, 44.5141], [40.1752, 44.5120],
         ]),
         ("Teryan Street", "unspecified", [
             [40.1826, 44.5062], [40.1808, 44.5090], [40.1790, 44.5118], [40.1772, 44.5146],
@@ -1102,10 +1117,7 @@ def api_parking():
     for f in PARKING_FEATURES:
         state = simulate_segment_state(f["id"], f["parking_type"], now)
 
-        if f["geometry_type"] == "LineString":
-            geometry = {"type": "LineString", "coordinates": f["coordinates"]}
-        else:
-            geometry = {"type": "Polygon", "coordinates": f["coordinates"]}
+        geometry = {"type": f["geometry_type"], "coordinates": f["coordinates"]}
 
         geojson_features.append({
             "type": "Feature",
@@ -1280,6 +1292,48 @@ def api_recommend():
         "recommendations": top3,
     })
 
+
+# Loose bounding box around Kentron, Yerevan. Any admin-submitted point
+# outside this box is almost certainly a typo (swapped lat/lon, pasted
+# coordinates from the wrong place, etc.) and would otherwise get written
+# straight into the shared PostgreSQL table and corrupt the map for every
+# user. +/- ~0.08 deg (~8km) gives comfortable room around the city center.
+MAP_BOUNDS = {
+    "lat_min": MAP_CENTER[0] - 0.08, "lat_max": MAP_CENTER[0] + 0.08,
+    "lon_min": MAP_CENTER[1] - 0.08, "lon_max": MAP_CENTER[1] + 0.08,
+}
+
+
+def _all_points(coordinates, geometry_type: str):
+    """Flatten a GeoJSON coordinates array (LineString/Polygon/MultiLineString) into a flat list of [lon, lat] points."""
+    pts = []
+    def walk(node):
+        if not isinstance(node, list):
+            return
+        if len(node) == 2 and all(isinstance(v, (int, float)) for v in node):
+            pts.append(node)
+            return
+        for child in node:
+            walk(child)
+    walk(coordinates)
+    return pts
+
+
+def _validate_feature_coordinates(coordinates, geometry_type: str) -> str | None:
+    """Returns an error message if any point falls outside the Kentron/Yerevan area, else None."""
+    pts = _all_points(coordinates, geometry_type)
+    if not pts:
+        return "No coordinates supplied."
+    for lon, lat in pts:
+        if not (MAP_BOUNDS["lat_min"] <= lat <= MAP_BOUNDS["lat_max"] and
+                MAP_BOUNDS["lon_min"] <= lon <= MAP_BOUNDS["lon_max"]):
+            return (f"Point [lon={lon}, lat={lat}] is outside the expected Yerevan/Kentron area "
+                    f"(lat {MAP_BOUNDS['lat_min']:.4f}..{MAP_BOUNDS['lat_max']:.4f}, "
+                    f"lon {MAP_BOUNDS['lon_min']:.4f}..{MAP_BOUNDS['lon_max']:.4f}). "
+                    "Check for a swapped lat/lon or a typo before saving.")
+    return None
+
+
 @app.route("/api/admin/feature", methods=["POST"])
 def api_admin_save_feature():
     global PARKING_FEATURES
@@ -1292,6 +1346,11 @@ def api_admin_save_feature():
     # Automatically generate an ID if the frontend passes an un-saved segment
     if not normalized["id"] or normalized["id"] == "unk":
         normalized["id"] = hashlib.md5(str(time.time()).encode()).hexdigest()[:10]
+
+    # Reject out-of-area coordinates before they ever touch the shared DB.
+    validation_error = _validate_feature_coordinates(normalized["coordinates"], normalized["geometry_type"])
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
 
     lat, lon = _extract_lat_lon(normalized)
 

@@ -1574,8 +1574,12 @@ function deleteAdminFeature() {
   fetch(`/api/admin/feature/${encodeURIComponent(id)}`, {
     method: 'DELETE'
   })
-  .then(r => r.json())
-  .then(() => {
+  .then(r => r.json().then(body => ({ ok: r.ok, body })))
+  .then(({ ok, body }) => {
+    if (!ok) {
+      alert(body.error || 'Could not delete this segment.');
+      return;
+    }
     closeAdminModal();
     loadParkingData();
   })

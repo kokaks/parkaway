@@ -1368,16 +1368,27 @@ function toggleAdminMode() {
     btn.innerText = 'Exit Curation Mode';
     if (map.pm) {
       map.pm.addControls({ position: 'topright', drawCircle: false, drawMarker: false });
+      map.on('pm:create', onGeomanCreate);
     }
   } else {
     btn.classList.remove('active');
     btn.innerText = 'Admin / Curation Mode';
     if (map.pm) {
       map.pm.removeControls();
+      map.off('pm:create', onGeomanCreate);
     }
     closeAdminModal();
   }
   loadParkingData();
+}
+
+function onGeomanCreate(e) {
+  const layer = e.layer;
+  const geojson = layer.toGeoJSON();
+  openAdminModal({
+    properties: { id: 'seg_' + Date.now(), name: '', parking_type: 'free' },
+    geometry: geojson.geometry
+  });
 }
 
 async function logMLFeedback() {
@@ -1386,45 +1397,45 @@ async function logMLFeedback() {
 
   // Helper function to transmit payload to Flask backend
   async function sendMLData(lat, lon) {
-  try {
-    const payload = {
-      lat: parseFloat(lat),
-      lon: parseFloat(lon),
-      dest_lat: window.currentDestination ? window.currentDestination.lat : null,
-      dest_lon: window.currentDestination ? window.currentDestination.lon : null
-    };
-
-    const response = await fetch('/api/admin/ml_feedback', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    // 1. Fetch raw text first to handle non-JSON HTML server responses safely
-    const rawText = await response.text();
-    let resData;
-
     try {
-      resData = JSON.parse(rawText);
-    } catch (e) {
-      // Triggered if Flask or Render returns HTML (404/500/502)
-      throw new Error(`Server returned HTML/plain text (${response.status}): ${rawText.substring(0, 120)}...`);
-    }
+      const payload = {
+        lat: parseFloat(lat),
+        lon: parseFloat(lon),
+        dest_lat: currentDest ? currentDest.lat : null,
+        dest_lon: currentDest ? currentDest.lon : null
+      };
 
-    // 2. Handle JSON response
-    if (response.ok) {
-      alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
-    } else {
-      alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
+      const response = await fetch('/api/admin/ml_feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      // 1. Fetch raw text first to handle non-JSON HTML server responses safely
+      const rawText = await response.text();
+      let resData;
+
+      try {
+        resData = JSON.parse(rawText);
+      } catch (e) {
+        // Triggered if Flask or Render returns HTML (404/500/502)
+        throw new Error(`Server returned HTML/plain text (${response.status}): ${rawText.substring(0, 120)}...`);
+      }
+
+      // 2. Handle JSON response
+      if (response.ok) {
+        alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
+      } else {
+        alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
+      }
+    } catch (err) {
+      alert(`Network Error: ${err.message}`);
+    } finally {
+      if (btn) btn.disabled = false;
     }
-  } catch (err) {
-    alert(`Network Error: ${err.message}`);
-  } finally {
-    if (btn) btn.disabled = false;
   }
-}
 
   // 1. Fallback if browser lacks geolocation capability
   if (!navigator.geolocation) {
@@ -1454,9 +1465,14 @@ async function logMLFeedback() {
 
 function openAdminModal(feature) {
   const props = feature.properties || feature;
+  const geom = feature.geometry || {};
+  
   document.getElementById('edit-id').value = props.id || '';
   document.getElementById('edit-name').value = props.name || '';
   document.getElementById('edit-type').value = props.parking_type || 'free';
+  document.getElementById('edit-geom-type').value = geom.type || 'LineString';
+  document.getElementById('edit-coords').value = geom.coordinates ? JSON.stringify(geom.coordinates) : '';
+
   document.getElementById('admin-modal').classList.remove('hidden');
 }
 
@@ -1468,13 +1484,22 @@ function saveAdminFeature() {
   const id = document.getElementById('edit-id').value || 'seg_' + Date.now();
   const name = document.getElementById('edit-name').value || 'New Segment';
   const parkingType = document.getElementById('edit-type').value;
+  const geomType = document.getElementById('edit-geom-type').value || 'LineString';
+  const coordsRaw = document.getElementById('edit-coords').value;
+
+  let coords;
+  try {
+    coords = coordsRaw ? JSON.parse(coordsRaw) : [[44.5122, 40.1808], [44.5133, 40.1795]];
+  } catch (e) {
+    coords = [[44.5122, 40.1808], [44.5133, 40.1795]];
+  }
 
   const payload = {
     id: id,
     name: name,
     parking_type: parkingType,
-    geometry_type: 'LineString',
-    coordinates: [[44.5122, 40.1808], [44.5133, 40.1795]]
+    geometry_type: geomType,
+    coordinates: coords
   };
 
   fetch('/api/admin/feature', {
@@ -1486,11 +1511,29 @@ function saveAdminFeature() {
   .then(() => {
     closeAdminModal();
     loadParkingData();
-  });
+  })
+  .catch(err => console.error('Error saving feature:', err));
 }
 
 function deleteAdminFeature() {
-  closeAdminModal();
+  const id = document.getElementById('edit-id').value;
+  if (!id) {
+    closeAdminModal();
+    return;
+  }
+  
+  fetch(`/api/admin/feature/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  })
+  .then(r => r.json())
+  .then(() => {
+    closeAdminModal();
+    loadParkingData();
+  })
+  .catch(err => {
+    console.error('Error deleting feature:', err);
+    closeAdminModal();
+  });
 }
 </script>
 </body>

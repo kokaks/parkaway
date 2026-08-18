@@ -703,7 +703,19 @@ def _normalize_feature(f: dict) -> dict:
 
     parking_type = props.get("parking_type") or f.get("parking_type") or "free"
     geom_type = geom.get("type") or f.get("geometry_type") or "LineString"
+    
     coords = geom.get("coordinates") or f.get("coordinates") or []
+    
+    # Force parse stringified JSON coordinates
+    if isinstance(coords, str):
+        try:
+            coords = json.loads(coords)
+            if isinstance(f.get("geometry"), dict):
+                f["geometry"]["coordinates"] = coords
+            else:
+                f["coordinates"] = coords
+        except Exception:
+            pass
 
     lat, lon = _extract_lat_lon(f)
 
@@ -775,13 +787,29 @@ with app.app_context():
     else:
         print(f"[data] Loaded {len(segments)} segments from PostgreSQL database.")
         for s in segments:
+            coords = s.coordinates
+            
+            # Ensure coordinates are a parsed list, not a string
+            if isinstance(coords, str):
+                try:
+                    coords = json.loads(coords)
+                except Exception:
+                    pass
+            
+            c_lat = s.centroid_lat
+            c_lon = s.centroid_lon
+            
+            # Self-heal corrupted centroids that defaulted to MAP_CENTER due to previous errors
+            if c_lat == MAP_CENTER[0] and c_lon == MAP_CENTER[1] and coords:
+                c_lat, c_lon = _extract_lat_lon({"coordinates": coords})
+                
             PARKING_FEATURES.append({
                 "id": s.id,
                 "name": s.name,
                 "parking_type": s.parking_type,
                 "geometry_type": s.geometry_type,
-                "coordinates": s.coordinates,
-                "centroid": [s.centroid_lon, s.centroid_lat]
+                "coordinates": coords,
+                "centroid": [c_lon, c_lat]
             })
 
 # --------------------------------------------------------------------------

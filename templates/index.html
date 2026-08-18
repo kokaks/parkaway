@@ -1180,23 +1180,68 @@ function loadParkingData() {
   fetch('/api/parking')
     .then(r => r.json())
     .then(data => {
-      // Ensure the array of custom objects is properly mapped into a valid GeoJSON FeatureCollection for Leaflet
-      const geojson = Array.isArray(data) ? {
-        type: "FeatureCollection",
-        features: data.map(item => ({
-          type: "Feature",
-          properties: item,
-          geometry: {
-            type: item.geometry_type || 'LineString',
-            coordinates: item.coordinates
-          }
-        }))
-      } : data;
+      const features = [];
+      const rawData = Array.isArray(data) ? data : (data.features || []);
 
-      parkingLayer = L.geoJSON(geojson, {
+      rawData.forEach(item => {
+        let coords = item.coordinates || (item.geometry && item.geometry.coordinates);
+        let type = item.geometry_type || (item.geometry && item.geometry.type) || 'LineString';
+
+        if (!coords || coords.length === 0) return;
+
+        // 1. Fix Flat 1D Arrays (if backend sends [lat, lon, lat, lon])
+        if (typeof coords[0] === 'number') {
+          const paired = [];
+          for (let i = 0; i < coords.length; i += 2) {
+            paired.push([coords[i], coords[i+1]]);
+          }
+          coords = paired;
+        }
+
+        // 2. Fix Lat/Lon Inversion (GeoJSON strictly requires [Lon, Lat])
+        // Yerevan is roughly Lat 40.1, Lon 44.5. 
+        const normalizePoint = (pt) => {
+          // If the first coordinate is ~40, it's Latitude. Swap to [Lon, Lat].
+          if (pt[0] > 39 && pt[0] < 42 && pt[1] > 43 && pt[1] < 46) {
+            return [pt[1], pt[0]];
+          }
+          return pt;
+        };
+
+        if (type === 'LineString') {
+          coords = coords.map(normalizePoint);
+        } else if (type === 'Polygon' || type === 'MultiLineString') {
+          coords = coords.map(ring => ring.map(normalizePoint));
+        }
+
+        // 3. Fix Spiderweb Jumps (Flattened independent segments)
+        // If the backend strung multiple independent 2-point street segments into one continuous LineString,
+        // we chunk them into a MultiLineString so they render as disconnected segments.
+        if (type === 'LineString' && coords.length > 2) {
+          type = 'MultiLineString';
+          const multiCoords = [];
+          for (let i = 0; i < coords.length; i += 2) {
+            if (coords[i+1]) {
+              multiCoords.push([coords[i], coords[i+1]]);
+            }
+          }
+          coords = multiCoords;
+        }
+
+        features.push({
+          type: "Feature",
+          properties: item.properties || item,
+          geometry: {
+            type: type,
+            coordinates: coords
+          }
+        });
+      });
+
+      parkingLayer = L.geoJSON({ type: "FeatureCollection", features: features }, {
         style: (feature) => ({
           color: feature.properties.color || '#7f8c8d',
-          weight: feature.geometry.type === 'Polygon' ? 2 : 5,
+          weight: feature.geometry.type.includes('Polygon') ? 2 : 5,
           opacity: 0.85,
           fillColor: feature.properties.color || '#7f8c8d',
           fillOpacity: 0.35
@@ -1205,8 +1250,8 @@ function loadParkingData() {
           const props = feature.properties;
           layer.bindPopup(`
             <div style="font-family:'Inter',sans-serif; color:#14151a;">
-              <strong style="font-size:14px; font-weight:700;">${escapeHtml(props.name)}</strong><br/>
-              <span style="font-size:12px; color:#555;">Type: <b>${TYPE_LABEL[props.parking_type] || props.parking_type}</b></span><br/>
+              <strong style="font-size:14px; font-weight:700;">${escapeHtml(props.name || 'Segment')}</strong><br/>
+              <span style="font-size:12px; color:#555;">Type: <b>${TYPE_LABEL[props.parking_type] || props.parking_type || 'Unspecified'}</b></span><br/>
               <span style="font-size:12px; color:#555;">Availability: <b>${props.availability_pct || '--'}%</b></span><br/>
               <span style="font-size:12px; color:#555;">Traffic Level: <b>${props.traffic_level || '--'}</b></span>
             </div>
@@ -1220,7 +1265,8 @@ function loadParkingData() {
           }
         }
       }).addTo(map);
-    });
+    })
+    .catch(err => console.error("Error loading parking data:", err));
 }
 
 function renderPresets() {

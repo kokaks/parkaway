@@ -954,6 +954,13 @@ let recMarkers = [];
 let currentDest = null;
 let isAdminMode = false;
 let searchDebounceTimer = null;
+// Holds the raw shape Leaflet-Geoman draws directly on the map while the
+// Save/Cancel modal is open for a brand-new (not-yet-saved) segment. Geoman
+// adds this layer to the map immediately on drawing, independent of the
+// app's real synced data layer (parkingLayer) - if we don't explicitly
+// remove it once the modal closes, it lingers on the map forever and looks
+// exactly like a saved segment even if it was cancelled or the save failed.
+let pendingDrawLayer = null;
 
 // Live GPS state
 let userMarker = null;
@@ -1430,6 +1437,7 @@ function toggleAdminMode() {
 
 function onGeomanCreate(e) {
   const layer = e.layer;
+  pendingDrawLayer = layer;
   const geojson = layer.toGeoJSON();
   openAdminModal({
     properties: { id: 'seg_' + Date.now(), name: '', parking_type: 'free' },
@@ -1524,6 +1532,14 @@ function openAdminModal(feature) {
 
 function closeAdminModal() {
   document.getElementById('admin-modal').classList.add('hidden');
+  // Remove Geoman's raw drawn layer if one is pending. On a successful save,
+  // loadParkingData() (called right after this) redraws the authoritative
+  // version from the server, so this temp layer must not be left behind as
+  // a visual duplicate that was never actually persisted.
+  if (pendingDrawLayer) {
+    map.removeLayer(pendingDrawLayer);
+    pendingDrawLayer = null;
+  }
 }
 
 function saveAdminFeature() {

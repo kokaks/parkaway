@@ -952,9 +952,10 @@ def pwa_manifest():
 @app.route("/sw.js")
 def service_worker():
     js = """
-    const CACHE_NAME = 'yerevan-parking-v1';
-    const urlsToCache = [
-        '/',
+    // Bump this on every deploy that changes app behavior. Changing the name
+    // makes old caches orphaned so they get cleaned up in 'activate' below.
+    const CACHE_NAME = 'yerevan-parking-v2';
+    const STATIC_ASSETS = [
         'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap',
         'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
         'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
@@ -963,19 +964,40 @@ def service_worker():
     ];
 
     self.addEventListener('install', event => {
+        // Take over immediately instead of waiting for every open tab to close.
+        self.skipWaiting();
         event.waitUntil(
-            caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
+            caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
+        );
+    });
+
+    self.addEventListener('activate', event => {
+        event.waitUntil(
+            caches.keys().then(names =>
+                Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)))
+            ).then(() => self.clients.claim())
         );
     });
 
     self.addEventListener('fetch', event => {
+        const url = new URL(event.request.url);
+        const isApi = url.pathname.startsWith('/api/');
+        const isAppShell = event.request.mode === 'navigate' || url.pathname === '/';
+
+        // API calls and the app shell (index.html/JS) must always be
+        // network-first: they change frequently (live parking data, and
+        // your own app updates) and must never be served from a stale cache.
+        // Only the static CDN libraries above (Leaflet, fonts, etc., which
+        // are version-pinned and never change) are served cache-first.
+        if (isApi || isAppShell) {
+            event.respondWith(
+                fetch(event.request).catch(() => caches.match(event.request))
+            );
+            return;
+        }
+
         event.respondWith(
-            caches.match(event.request).then(response => {
-                if (response) {
-                    return response;
-                }
-                return fetch(event.request);
-            })
+            caches.match(event.request).then(response => response || fetch(event.request))
         );
     });
     """
@@ -1124,6 +1146,7 @@ def api_parking():
         state = simulate_segment_state(f["id"], f["parking_type"], now)
 
         geometry = {"type": f["geometry_type"], "coordinates": f["coordinates"]}
+        centroid_lat, centroid_lon = _extract_lat_lon(f)
 
         geojson_features.append({
             "type": "Feature",
@@ -1133,6 +1156,8 @@ def api_parking():
                 "name": f["name"],
                 "parking_type": f["parking_type"],
                 "color": TYPE_COLORS.get(f["parking_type"], "#7f8c8d"),
+                "centroid_lat": round(centroid_lat, 6),
+                "centroid_lon": round(centroid_lon, 6),
                 **state,
             },
         })

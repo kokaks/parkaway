@@ -695,8 +695,14 @@ def _extract_lat_lon(feature: dict) -> tuple[float, float]:
     pts = coords
     while isinstance(pts, list) and len(pts) > 0 and isinstance(pts[0], list) and len(pts[0]) > 0 and isinstance(pts[0][0], list):
         pts = pts[0]
-    if isinstance(pts, list) and len(pts) > 0 and isinstance(pts[0], list):
-        pts = pts[0]
+    # NOTE: the while loop above already unwraps Polygon/MultiLineString rings
+    # down to a flat list of [lon, lat] points. Do NOT unwrap again here -
+    # doing so used to strip off a normal 2+ point LineString down to just
+    # its first point, which made the averaging below throw and silently
+    # fall back to MAP_CENTER. That meant every segment added through Admin
+    # Mode got mislocated to the exact center of Kentron for distance-based
+    # recommendation purposes (even though it still drew correctly on the
+    # map, since the map uses the raw coordinates, not this centroid).
 
     try:
         avg_0 = sum(p[0] for p in pts) / len(pts)
@@ -1114,7 +1120,7 @@ def api_parking():
     now = datetime.now()
     geojson_features = []
 
-    for f in PARKING_FEATURES:
+    for f in _get_live_features():
         state = simulate_segment_state(f["id"], f["parking_type"], now)
 
         geometry = {"type": f["geometry_type"], "coordinates": f["coordinates"]}
@@ -1131,11 +1137,13 @@ def api_parking():
             },
         })
 
-    return jsonify({
+    resp = jsonify({
         "type": "FeatureCollection",
         "generated_at": now.isoformat(),
         "features": geojson_features,
     })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @app.route("/api/traffic")
 def api_traffic():
@@ -1177,6 +1185,41 @@ def api_traffic():
         "streets": rows,
     })
 
+def _get_live_features() -> list[dict]:
+    """
+    Reads parking segments directly from PostgreSQL rather than the in-process
+    PARKING_FEATURES cache.
+
+    Why: PARKING_FEATURES is only populated once, at process startup. If the
+    app is ever running more than one worker process (Render's default
+    gunicorn setup often is), a segment saved or deleted via Admin Mode only
+    updates the memory of the *one* worker that handled that request — other
+    workers (which may well be the ones that end up serving a later
+    /api/recommend call) keep serving stale data until they happen to
+    restart. Querying the DB directly here is cheap for a table this size
+    and guarantees recommendations always reflect the latest saved/deleted
+    segments, no matter which process handles the request.
+    """
+    segments = ParkingSegment.query.all()
+    features = []
+    for s in segments:
+        coords = s.coordinates
+        if isinstance(coords, str):
+            try:
+                coords = json.loads(coords)
+            except Exception:
+                pass
+        features.append({
+            "id": s.id,
+            "name": s.name,
+            "parking_type": s.parking_type,
+            "geometry_type": s.geometry_type,
+            "coordinates": coords,
+            "centroid": [s.centroid_lon, s.centroid_lat],
+        })
+    return features
+
+
 def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_mult, weather_info):
     """
     Core multi-factor recommendation scoring engine. Shared by /api/recommend
@@ -1189,10 +1232,11 @@ def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_
     weather_factor = weather_info["weather_factor"]
     candidates = []
     current_radius = requested_radius
+    live_features = _get_live_features()
 
     for current_radius in [requested_radius, 1500.0, 3000.0]:
         candidates = []
-        for f in PARKING_FEATURES:
+        for f in live_features:
             if f.get("parking_type") == "unavailable":
                 continue
 
@@ -1282,7 +1326,7 @@ def api_recommend():
     )
     top3 = candidates[:3]
 
-    return jsonify({
+    resp = jsonify({
         "destination": {"lat": dest_lat, "lon": dest_lon},
         "radius_m": current_radius,
         "generated_at": now.isoformat(),
@@ -1291,6 +1335,8 @@ def api_recommend():
         "live_traffic_multiplier": traffic_mult,
         "recommendations": top3,
     })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # Loose bounding box around Kentron, Yerevan. Any admin-submitted point

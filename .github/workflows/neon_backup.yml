@@ -1,0 +1,44 @@
+name: Weekly Neon DB Backup
+
+# Runs every Monday at 03:00 UTC, and can also be triggered manually from the
+# Actions tab (handy for testing this workflow without waiting for Monday).
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Dump database
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          mkdir -p backups
+          STAMP=$(date -u +'%Y-%m-%d')
+          pg_dump "$DATABASE_URL" --no-owner --no-privileges \
+            | gzip > "backups/parking_db_${STAMP}.sql.gz"
+          echo "BACKUP_FILE=backups/parking_db_${STAMP}.sql.gz" >> "$GITHUB_ENV"
+
+      - name: Prune backups older than 90 days
+        run: |
+          find backups -name "parking_db_*.sql.gz" -mtime +90 -print -delete
+
+      - name: Commit backup to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backups/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Weekly DB backup: ${BACKUP_FILE}"
+            git push
+          fi

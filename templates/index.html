@@ -1177,7 +1177,7 @@ function selectSearchLocation(item) {
 function loadParkingData() {
   if (parkingLayer) map.removeLayer(parkingLayer);
 
-  fetch('/api/parking')
+  fetch('/api/parking', { cache: 'no-store' })
     .then(r => r.json())
     .then(data => {
       const features = [];
@@ -1303,7 +1303,7 @@ function clearDestination() {
 }
 
 function fetchRecommendations(lat, lon) {
-  fetch(`/api/recommend?lat=${lat}&lon=${lon}`)
+  fetch(`/api/recommend?lat=${lat}&lon=${lon}`, { cache: 'no-store' })
     .then(r => r.json())
     .then(data => {
       renderRecommendations(data.recommendations);

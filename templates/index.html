@@ -632,7 +632,7 @@
     100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
   }
 
-  #admin-modal {
+  #admin-modal, #admin-login-modal {
     position: absolute;
     top: calc(75px + var(--safe-top));
     right: calc(20px + var(--safe-right));
@@ -645,8 +645,8 @@
     width: 290px;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
   }
-  #admin-modal.hidden { display: none; }
-  #admin-modal h3 {
+  #admin-modal.hidden, #admin-login-modal.hidden { display: none; }
+  #admin-modal h3, #admin-login-modal h3 {
     margin: 0 0 14px;
     font-family: 'Space Grotesk', sans-serif;
     font-size: 15px;
@@ -793,7 +793,7 @@
       font-size: 11px;
     }
 
-    #admin-modal {
+    #admin-modal, #admin-login-modal {
       position: fixed;
       top: 50%; left: 50%; right: auto;
       transform: translate(-50%, -50%);
@@ -922,6 +922,21 @@
         <button class="btn-save" onclick="saveAdminFeature()">Save Segment</button>
         <button class="btn-delete" id="btn-delete" onclick="deleteAdminFeature()">Delete</button>
         <button class="btn-cancel" onclick="closeAdminModal()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Admin Login Modal Overlay -->
+    <div id="admin-login-modal" class="hidden">
+      <h3>Admin Login</h3>
+      <div class="admin-field">
+        <label for="admin-login-password">Password</label>
+        <input type="password" id="admin-login-password" placeholder="Enter admin password"
+               onkeydown="if(event.key==='Enter'){event.preventDefault(); submitAdminLogin();}" />
+      </div>
+      <div id="admin-login-error" style="color:#e74c3c; font-size:12px; min-height:16px; margin-top:-8px;"></div>
+      <div class="admin-actions">
+        <button class="btn-save" onclick="submitAdminLogin()">Log In</button>
+        <button class="btn-cancel" onclick="closeAdminLoginModal()">Cancel</button>
       </div>
     </div>
 
@@ -1414,9 +1429,34 @@ function toggleMobileSheet() {
 // --------------------------------------------------------------------------
 
 function toggleAdminMode() {
-  isAdminMode = !isAdminMode;
-  const btn = document.getElementById('admin-toggle');
   if (isAdminMode) {
+    // Exiting: also invalidate the server-side session so a lost/borrowed
+    // phone doesn't leave a standing admin session behind.
+    fetch('/api/admin/logout', { method: 'POST', cache: 'no-store' }).catch(() => {});
+    setAdminModeUI(false);
+    loadParkingData();
+    return;
+  }
+
+  // Entering: check whether we already have a valid session (e.g. logged in
+  // earlier this browser session) before bothering to prompt for a password.
+  fetch('/api/admin/status', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(({ is_admin }) => {
+      if (is_admin) {
+        setAdminModeUI(true);
+        loadParkingData();
+      } else {
+        openAdminLoginModal();
+      }
+    })
+    .catch(() => openAdminLoginModal());
+}
+
+function setAdminModeUI(enabled) {
+  isAdminMode = enabled;
+  const btn = document.getElementById('admin-toggle');
+  if (enabled) {
     btn.classList.add('active');
     btn.innerText = 'Exit Curation Mode';
     if (map.pm) {
@@ -1432,7 +1472,45 @@ function toggleAdminMode() {
     }
     closeAdminModal();
   }
-  loadParkingData();
+}
+
+function openAdminLoginModal() {
+  const pwField = document.getElementById('admin-login-password');
+  const errField = document.getElementById('admin-login-error');
+  if (pwField) pwField.value = '';
+  if (errField) errField.textContent = '';
+  document.getElementById('admin-login-modal').classList.remove('hidden');
+  if (pwField) pwField.focus();
+}
+
+function closeAdminLoginModal() {
+  document.getElementById('admin-login-modal').classList.add('hidden');
+}
+
+function submitAdminLogin() {
+  const pwField = document.getElementById('admin-login-password');
+  const errField = document.getElementById('admin-login-error');
+  const password = pwField ? pwField.value : '';
+
+  fetch('/api/admin/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+    cache: 'no-store'
+  })
+    .then(r => r.json().then(body => ({ ok: r.ok, body })))
+    .then(({ ok, body }) => {
+      if (!ok) {
+        if (errField) errField.textContent = body.error || 'Login failed.';
+        return;
+      }
+      closeAdminLoginModal();
+      setAdminModeUI(true);
+      loadParkingData();
+    })
+    .catch(() => {
+      if (errField) errField.textContent = 'Network error. Please try again.';
+    });
 }
 
 function onGeomanCreate(e) {
@@ -1542,6 +1620,19 @@ function closeAdminModal() {
   }
 }
 
+// Shared handler for admin API responses: if the session expired mid-use
+// (401), drop back to logged-out state and re-prompt for the password
+// instead of just showing a raw error the person can't act on.
+function handleAdminAuthFailure(status, body) {
+  if (status === 401) {
+    setAdminModeUI(false);
+    alert('Your admin session has expired. Please log in again.');
+    openAdminLoginModal();
+    return true;
+  }
+  return false;
+}
+
 function saveAdminFeature() {
   const id = document.getElementById('edit-id').value || 'seg_' + Date.now();
   const name = document.getElementById('edit-name').value || 'New Segment';
@@ -1567,11 +1658,13 @@ function saveAdminFeature() {
   fetch('/api/admin/feature', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    cache: 'no-store'
   })
-  .then(r => r.json().then(body => ({ ok: r.ok, body })))
-  .then(({ ok, body }) => {
+  .then(r => r.json().then(body => ({ status: r.status, ok: r.ok, body })))
+  .then(({ status, ok, body }) => {
     if (!ok) {
+      if (handleAdminAuthFailure(status, body)) return;
       alert(body.error || 'Could not save this segment.');
       return;
     }
@@ -1589,11 +1682,13 @@ function deleteAdminFeature() {
   }
   
   fetch(`/api/admin/feature/${encodeURIComponent(id)}`, {
-    method: 'DELETE'
+    method: 'DELETE',
+    cache: 'no-store'
   })
-  .then(r => r.json().then(body => ({ ok: r.ok, body })))
-  .then(({ ok, body }) => {
+  .then(r => r.json().then(body => ({ status: r.status, ok: r.ok, body })))
+  .then(({ status, ok, body }) => {
     if (!ok) {
+      if (handleAdminAuthFailure(status, body)) return;
       alert(body.error || 'Could not delete this segment.');
       return;
     }

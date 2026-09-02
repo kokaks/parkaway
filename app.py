@@ -28,20 +28,22 @@ from __future__ import annotations
 
 from flask_sqlalchemy import SQLAlchemy
 import hashlib
+import hmac
 import json
 import math
 import os
 import random
+import secrets
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
+from functools import wraps
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, make_response
+from flask import Flask, jsonify, render_template, request, make_response, session
 
 # --------------------------------------------------------------------------
 # Configuration
@@ -117,6 +119,119 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db').replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+# --------------------------------------------------------------------------
+# Security Configuration
+# --------------------------------------------------------------------------
+# SECRET_KEY signs the admin login session cookie. If it's not set via
+# environment variable, we fall back to a random one generated at process
+# startup - which means every admin session gets invalidated whenever the
+# process restarts (Render free-tier services restart often: on every
+# deploy, and after idle spin-down). Set SECRET_KEY in Render's environment
+# variables (Settings -> Environment) to a long random string so your login
+# persists normally. Generate one with: python -c "import secrets; print(secrets.token_hex(32))"
+_env_secret = os.environ.get("SECRET_KEY")
+if not _env_secret:
+    print("[WARNING] SECRET_KEY not set - using a random key for this process only. "
+          "Admin logins will be lost on every restart until you set SECRET_KEY in your environment.")
+app.secret_key = _env_secret or secrets.token_hex(32)
+
+# ADMIN_PASSWORD gates access to Admin/Curation Mode (adding, editing, and
+# deleting parking segments). This must be set via environment variable -
+# there is no hardcoded default, and if it's missing, admin mode is fully
+# disabled (fails closed, not open) rather than silently accessible to
+# anyone. Set it in Render's environment variables (Settings -> Environment).
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+if not ADMIN_PASSWORD:
+    print("[WARNING] ADMIN_PASSWORD not set - Admin/Curation Mode is disabled until you set it "
+          "in your environment variables.")
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,      # JS can't read the session cookie (mitigates XSS cookie theft)
+    SESSION_COOKIE_SAMESITE="Lax",     # basic CSRF mitigation for the login/admin endpoints
+    SESSION_COOKIE_SECURE=os.environ.get("RENDER") is not None,  # only require HTTPS in real deployment; allow local http dev
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    MAX_CONTENT_LENGTH=1 * 1024 * 1024,  # reject request bodies over 1MB (basic DoS/abuse guard)
+)
+
+
+# --------------------------------------------------------------------------
+# Lightweight in-memory rate limiting
+# --------------------------------------------------------------------------
+# NOTE: this is per-process, in-memory rate limiting. It's a pragmatic,
+# dependency-free guard against casual abuse/spam for a small public app - it
+# is NOT a substitute for a real distributed limiter (e.g. Redis-backed) if
+# this app ever runs with multiple gunicorn workers or scales to multiple
+# instances, since each process keeps its own counts. For this app's scale
+# (a single small Render web service), it's a meaningful, cheap improvement.
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+
+def _check_rate_limit(key: str, max_requests: int, window_seconds: float) -> bool:
+    """Returns True if the request is allowed, False if the caller has exceeded
+    max_requests within window_seconds. Records the request if allowed."""
+    now = time.time()
+    bucket = _rate_limit_store[key]
+    cutoff = now - window_seconds
+    while bucket and bucket[0] < cutoff:
+        bucket.pop(0)
+    if len(bucket) >= max_requests:
+        return False
+    bucket.append(now)
+    return True
+
+
+def _client_ip() -> str:
+    # Render sits behind a proxy; the real client IP is in X-Forwarded-For.
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+@app.before_request
+def _global_rate_limit():
+    if not request.path.startswith("/api/"):
+        return None
+    # Generous general ceiling per IP across all API endpoints, mainly to
+    # protect the database (and its free-tier compute-hour budget) from a
+    # runaway script or bot rather than to constrain normal human usage.
+    if not _check_rate_limit(f"global:{_client_ip()}", max_requests=120, window_seconds=60):
+        return jsonify({"error": "Too many requests. Please slow down and try again shortly."}), 429
+    return None
+
+
+def require_admin(view_func):
+    """Decorator: blocks a route unless the caller has an authenticated admin session."""
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not session.get("is_admin"):
+            return jsonify({"error": "Admin login required."}), 401
+        return view_func(*args, **kwargs)
+    return wrapped
+
+
+@app.after_request
+def _set_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Fairly permissive script/style-src (the app relies on inline <script>
+    # and inline styles) but still meaningfully restricts which origins can
+    # be loaded from, blocks the app from being framed by another site
+    # (clickjacking), and blocks plugin/object embeds entirely.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://unpkg.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https:; "
+        "object-src 'none'; "
+        "frame-ancestors 'none'"
+    )
+    if os.environ.get("RENDER"):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # --------------------------------------------------------------------------
 # Machine Learning Feedback & Admin Data Models (PostgreSQL)
@@ -718,12 +833,17 @@ def _normalize_feature(f: dict) -> dict:
     props = f.get("properties", {}) if isinstance(f.get("properties"), dict) else f
     geom = f.get("geometry", {}) if isinstance(f.get("geometry"), dict) else f
 
-    seg_id = str(f.get("id") or props.get("id") or "unk")
+    seg_id = str(f.get("id") or props.get("id") or "unk").strip()[:64]
     raw_name = props.get("name") or f.get("name") or "Parking Segment"
     clean_name = raw_name if isinstance(raw_name, str) else "Unnamed Segment"
+    clean_name = clean_name.strip()[:120] or "Parking Segment"  # matches db.String(128) column with margin
 
     parking_type = props.get("parking_type") or f.get("parking_type") or "free"
+    if parking_type not in TYPE_BASE_WEIGHT:
+        parking_type = "unspecified"
     geom_type = geom.get("type") or f.get("geometry_type") or "LineString"
+    if geom_type not in ("LineString", "Polygon", "MultiLineString"):
+        geom_type = "LineString"
     
     coords = geom.get("coordinates") or f.get("coordinates") or []
     
@@ -1405,7 +1525,45 @@ def _validate_feature_coordinates(coordinates, geometry_type: str) -> str | None
     return None
 
 
+# --------------------------------------------------------------------------
+# Admin Authentication
+# --------------------------------------------------------------------------
+@app.route("/api/admin/login", methods=["POST"])
+def api_admin_login():
+    if not ADMIN_PASSWORD:
+        return jsonify({"error": "Admin mode is not configured on this server."}), 503
+
+    # Strict per-IP limit to slow down password guessing, independent of
+    # (and in addition to) the general API rate limit above.
+    if not _check_rate_limit(f"login:{_client_ip()}", max_requests=5, window_seconds=300):
+        return jsonify({"error": "Too many login attempts. Please wait a few minutes and try again."}), 429
+
+    data = request.get_json(silent=True) or {}
+    submitted = str(data.get("password", ""))
+
+    # Constant-time comparison so response timing can't leak how many
+    # leading characters of the password guess were correct.
+    if not hmac.compare_digest(submitted, ADMIN_PASSWORD):
+        return jsonify({"error": "Incorrect password."}), 401
+
+    session.permanent = True
+    session["is_admin"] = True
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/admin/logout", methods=["POST"])
+def api_admin_logout():
+    session.pop("is_admin", None)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/admin/status")
+def api_admin_status():
+    return jsonify({"is_admin": bool(session.get("is_admin"))})
+
+
 @app.route("/api/admin/feature", methods=["POST"])
+@require_admin
 def api_admin_save_feature():
     global PARKING_FEATURES
     data = request.json
@@ -1468,6 +1626,7 @@ def api_admin_save_feature():
 
 
 @app.route("/api/admin/feature/<segment_id>", methods=["DELETE"])
+@require_admin
 def api_admin_delete_feature(segment_id):
     global PARKING_FEATURES
 
@@ -1494,6 +1653,14 @@ def api_admin_delete_feature(segment_id):
 # --------------------------------------------------------------------------
 @app.route('/api/admin/ml_feedback', methods=['POST'])
 def log_ml_feedback():
+    # This endpoint is intentionally open to the general public (it's how
+    # anyone using the app logs where they actually parked, for future ML
+    # training) - it does NOT require admin login. It does need its own
+    # spam guard though, since it's a public write endpoint that grows a
+    # database with a limited free storage quota.
+    if not _check_rate_limit(f"mlfeedback:{_client_ip()}", max_requests=10, window_seconds=60):
+        return jsonify({"error": "Too many log submissions. Please wait a moment and try again."}), 429
+
     data = request.get_json()
     
     # Validate payload coordinates
@@ -1614,5 +1781,15 @@ def log_ml_feedback():
 
 
 if __name__ == "__main__":
-    print("[server] Starting Yerevan Smart Parking Recommender server on http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    # debug=True enables Werkzeug's interactive debugger, which lets anyone
+    # who can trigger an unhandled exception run arbitrary Python on the
+    # server - completely unacceptable for a public deployment. It's now
+    # opt-in via FLASK_DEBUG=true for local development only, and off by
+    # default. Host/port also now respect Render's environment (it injects
+    # PORT and expects the app to bind 0.0.0.0) while still defaulting to
+    # 127.0.0.1:5000 for a plain local `python app.py` run.
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    port = int(os.environ.get("PORT", 5000))
+    host = "0.0.0.0" if os.environ.get("PORT") or os.environ.get("RENDER") else "127.0.0.1"
+    print(f"[server] Starting Yerevan Smart Parking Recommender server on {host}:{port} (debug={debug_mode})")
+    app.run(host=host, port=port, debug=debug_mode)

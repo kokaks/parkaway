@@ -1673,6 +1673,13 @@ def log_ml_feedback():
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid coordinate values."}), 400
 
+    # Defense in depth: reject coordinates nowhere near Kentron/Yerevan even
+    # if a request somehow bypasses the frontend's own GPS/confirmation flow.
+    # This uses the same bounding box as admin segment validation.
+    if not (MAP_BOUNDS["lat_min"] <= user_lat <= MAP_BOUNDS["lat_max"] and
+            MAP_BOUNDS["lon_min"] <= user_lon <= MAP_BOUNDS["lon_max"]):
+        return jsonify({"error": "Location is outside the expected Yerevan/Kentron area."}), 400
+
     dest_lat = None
     dest_lon = None
     if 'dest_lat' in data and 'dest_lon' in data:
@@ -1690,11 +1697,14 @@ def log_ml_feedback():
     day_of_week = local_now.weekday()
     is_weekend = day_of_week >= 5
 
-    # 2. Perform nearest parking segment matching
+    # 2. Perform nearest parking segment matching (reads live from the DB,
+    # same as /api/parking and /api/recommend, so a segment added or removed
+    # moments ago is reflected here too rather than an in-memory snapshot).
     closest_segment = None
     min_distance_m = float('inf')
 
-    for f in PARKING_FEATURES:
+    live_features = _get_live_features()
+    for f in live_features:
         f_lat, f_lon = _extract_lat_lon(f)
         dist = haversine_m(user_lat, user_lon, f_lat, f_lon)
         if dist < min_distance_m:

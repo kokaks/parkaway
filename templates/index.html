@@ -93,12 +93,31 @@
     border-bottom: 1px solid var(--basalt-line);
     cursor: pointer;
     touch-action: none;
+    position: relative;
   }
   .handle-bar {
     width: 42px;
     height: 5px;
     background: var(--basalt-line);
     border-radius: 3px;
+  }
+  .sheet-close-btn {
+    display: none;
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--basalt-800);
+    border: 1px solid var(--basalt-line);
+    color: var(--basalt-200);
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
   }
 
   #sidebar-scroll {
@@ -632,7 +651,7 @@
     100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
   }
 
-  #admin-modal, #admin-login-modal {
+  #admin-modal, #admin-login-modal, #ml-confirm-modal {
     position: absolute;
     top: calc(75px + var(--safe-top));
     right: calc(20px + var(--safe-right));
@@ -645,13 +664,14 @@
     width: 290px;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
   }
-  #admin-modal.hidden, #admin-login-modal.hidden { display: none; }
-  #admin-modal h3, #admin-login-modal h3 {
+  #admin-modal.hidden, #admin-login-modal.hidden, #ml-confirm-modal.hidden { display: none; }
+  #admin-modal h3, #admin-login-modal h3, #ml-confirm-modal h3 {
     margin: 0 0 14px;
     font-family: 'Space Grotesk', sans-serif;
     font-size: 15px;
     color: var(--paper);
   }
+  #ml-confirm-warning.hidden { display: none; }
   .admin-field {
     display: flex;
     flex-direction: column;
@@ -741,6 +761,10 @@
       display: flex;
     }
 
+    #sidebar:not(.sheet-collapsed) .sheet-close-btn {
+      display: flex;
+    }
+
     .brand {
       padding: 12px 18px 14px;
     }
@@ -793,7 +817,7 @@
       font-size: 11px;
     }
 
-    #admin-modal, #admin-login-modal {
+    #admin-modal, #admin-login-modal, #ml-confirm-modal {
       position: fixed;
       top: 50%; left: 50%; right: auto;
       transform: translate(-50%, -50%);
@@ -814,6 +838,7 @@
   <aside id="sidebar">
     <div id="mobile-sheet-handle" onclick="toggleMobileSheet()">
       <div class="handle-bar"></div>
+      <button type="button" class="sheet-close-btn" aria-label="Close panel" onclick="event.stopPropagation(); collapseMobileSheet();">&times;</button>
     </div>
 
     <div class="brand">
@@ -886,7 +911,7 @@
 
       <!-- Action Buttons -->
       <div id="admin-toggle-wrap">
-        <button id="ml-log-toggle" class="admin-btn" onclick="logMLFeedback()">Log ML Parking</button>
+        <button id="ml-log-toggle" class="admin-btn" onclick="logMLFeedback()">I Parked Here</button>
         <button id="admin-toggle" class="admin-btn" onclick="toggleAdminMode()">Admin / Curation Mode</button>
       </div>
 
@@ -940,6 +965,19 @@
       </div>
     </div>
 
+    <!-- "I Parked Here" Confirmation Modal -->
+    <div id="ml-confirm-modal" class="hidden">
+      <h3>Confirm Your Parking Spot</h3>
+      <p id="ml-confirm-body" style="font-size:13px; color:#ddd; line-height:1.5; margin:0 0 8px;"></p>
+      <p id="ml-confirm-warning" class="hidden" style="font-size:12px; color:#f39c12; line-height:1.4; margin:0 0 8px;"></p>
+      <p id="ml-confirm-accuracy" style="font-size:11px; color:#888; margin:0 0 12px;"></p>
+      <p style="font-size:11px; color:#999; margin:0 0 14px;">This helps us learn where people actually park nearby. Only confirm if you're currently parked here.</p>
+      <div class="admin-actions">
+        <button class="btn-save" onclick="confirmMLLog()">Yes, I Parked Here</button>
+        <button class="btn-cancel" onclick="closeMLConfirmModal()">Cancel</button>
+      </div>
+    </div>
+
     <div id="legend">
       <h3>Legend</h3>
       <div class="legend-row"><span class="swatch" style="background:#e74c3c"></span> Paid parking (red lines)</div>
@@ -976,6 +1014,10 @@ let searchDebounceTimer = null;
 // remove it once the modal closes, it lingers on the map forever and looks
 // exactly like a saved segment even if it was cancelled or the save failed.
 let pendingDrawLayer = null;
+// Latest parking segment features (name + centroid), refreshed every time
+// loadParkingData() runs. Used by the "I Parked Here" confirmation flow to
+// show the nearest known segment without a separate network round trip.
+let latestParkingFeatures = [];
 
 // Live GPS state
 let userMarker = null;
@@ -1246,6 +1288,8 @@ function loadParkingData() {
         });
       });
 
+      latestParkingFeatures = features;
+
       parkingLayer = L.geoJSON({ type: "FeatureCollection", features: features }, {
         style: (feature) => ({
           color: feature.properties.color || '#7f8c8d',
@@ -1424,6 +1468,92 @@ function toggleMobileSheet() {
   sidebar.classList.toggle('sheet-collapsed');
 }
 
+function collapseMobileSheet() {
+  document.getElementById('sidebar').classList.add('sheet-collapsed');
+}
+
+// --------------------------------------------------------------------------
+// Swipe-to-dismiss for the mobile bottom sheet. The handle bar previously
+// only responded to a tap, which many people don't realize is tappable at
+// all (a bar with no visible button doesn't read as "press me"). Real
+// drag-following, snapping to open/closed on release, matches how bottom
+// sheets behave in every native app, so it's discoverable without
+// instructions.
+// --------------------------------------------------------------------------
+(function setupSheetSwipe() {
+  const sidebar = document.getElementById('sidebar');
+  const handle = document.getElementById('mobile-sheet-handle');
+  if (!sidebar || !handle) return;
+
+  let startY = 0;
+  let currentTranslate = 0;
+  let dragging = false;
+  let sheetHeight = 0;
+
+  function collapsedTranslate() {
+    // Matches the CSS: translateY(calc(100% - 64px - safe-bottom))
+    const safeBottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')) || 0;
+    return sheetHeight - 64 - safeBottom;
+  }
+
+  function onPointerDown(e) {
+    // Let the explicit close button handle its own click without also
+    // triggering the parent handle's drag/tap logic (pointer events bubble
+    // up from the button to the handle underneath it).
+    if (e.target.closest('.sheet-close-btn')) return;
+    // Only left-click / primary touch, and only from the handle itself so
+    // dragging inside the sheet's own scrollable content isn't hijacked.
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    dragging = true;
+    sheetHeight = sidebar.getBoundingClientRect().height;
+    startY = e.clientY;
+    currentTranslate = sidebar.classList.contains('sheet-collapsed') ? collapsedTranslate() : 0;
+    sidebar.style.transition = 'none';
+    handle.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const delta = e.clientY - startY;
+    let next = currentTranslate + delta;
+    const maxTranslate = collapsedTranslate();
+    next = Math.max(0, Math.min(maxTranslate, next));
+    sidebar.style.transform = `translateY(${next}px)`;
+  }
+
+  function onPointerUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    sidebar.style.transition = '';
+    sidebar.style.transform = '';
+
+    const delta = e.clientY - startY;
+    const maxTranslate = collapsedTranslate() || 1;
+    const wasCollapsed = sidebar.classList.contains('sheet-collapsed');
+    const draggedFraction = delta / maxTranslate;
+
+    // A small movement is treated as a tap (preserves the original
+    // click-to-toggle behavior); a real drag snaps based on distance moved.
+    if (Math.abs(delta) < 8) {
+      sidebar.classList.toggle('sheet-collapsed');
+      return;
+    }
+
+    if (wasCollapsed) {
+      // Dragging up (negative delta) far enough opens it.
+      if (delta < -40) sidebar.classList.remove('sheet-collapsed');
+    } else {
+      // Dragging down far enough (or more than a third of the way) closes it.
+      if (delta > 40 || draggedFraction > 0.33) sidebar.classList.add('sheet-collapsed');
+    }
+  }
+
+  handle.addEventListener('pointerdown', onPointerDown);
+  handle.addEventListener('pointermove', onPointerMove);
+  handle.addEventListener('pointerup', onPointerUp);
+  handle.addEventListener('pointercancel', onPointerUp);
+})();
+
 // --------------------------------------------------------------------------
 // Admin Curation & ML Feedback Logic
 // --------------------------------------------------------------------------
@@ -1523,76 +1653,170 @@ function onGeomanCreate(e) {
   });
 }
 
-async function logMLFeedback() {
-  const btn = document.getElementById('ml-log-toggle');
-  if (btn) btn.disabled = true;
+// --------------------------------------------------------------------------
+// "I Parked Here" logging - redesigned to minimize false/accidental entries
+// from general public use:
+//   1. Requires a destination to already be set (keeps logs contextual and
+//      stops idle taps from people just poking at the UI).
+//   2. Fetches GPS first, in the background, BEFORE anything is written -
+//      nothing is ever sent to the server just because the button was
+//      pressed.
+//   3. Shows an explicit confirmation with the nearest known parking spot
+//      and distance, so the person can see whether it looks right before
+//      confirming. Cancel sends nothing at all.
+//   4. Never silently substitutes the map's center as a fake location if
+//      GPS fails - that used to record a false, misleading position. Now a
+//      GPS failure just shows a clear error and logs nothing.
+//   5. A short cooldown after a successful log prevents rapid repeat taps
+//      from creating duplicate entries.
+// --------------------------------------------------------------------------
+const ML_LOG_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
+let lastMLLogAt = 0;
+let pendingMLLogData = null; // { lat, lon, accuracy } while the confirm modal is open
 
-  // Helper function to transmit payload to Flask backend
-  async function sendMLData(lat, lon) {
-    try {
-      const payload = {
-        lat: parseFloat(lat),
-        lon: parseFloat(lon),
-        dest_lat: currentDest ? currentDest.lat : null,
-        dest_lon: currentDest ? currentDest.lon : null
-      };
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
 
-      const response = await fetch('/api/admin/ml_feedback', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      // 1. Fetch raw text first to handle non-JSON HTML server responses safely
-      const rawText = await response.text();
-      let resData;
-
-      try {
-        resData = JSON.parse(rawText);
-      } catch (e) {
-        // Triggered if Flask or Render returns HTML (404/500/502)
-        throw new Error(`Server returned HTML/plain text (${response.status}): ${rawText.substring(0, 120)}...`);
-      }
-
-      // 2. Handle JSON response
-      if (response.ok) {
-        alert(`ML Log Recorded Successfully!\nDatabase ID: ${resData.id}\nMatched Segment: ${resData.matched_segment || 'None'}`);
-      } else {
-        alert(`Server Error (${response.status}): ${resData.error || 'Failed to record log.'}`);
-      }
-    } catch (err) {
-      alert(`Network Error: ${err.message}`);
-    } finally {
-      if (btn) btn.disabled = false;
+function findNearestSegment(lat, lon) {
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const f of latestParkingFeatures) {
+    const p = f.properties;
+    if (p.centroid_lat == null || p.centroid_lon == null) continue;
+    const d = haversineMeters(lat, lon, p.centroid_lat, p.centroid_lon);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = p;
     }
   }
+  return nearest ? { name: nearest.name || 'Unnamed segment', distance: nearestDist } : null;
+}
 
-  // 1. Fallback if browser lacks geolocation capability
-  if (!navigator.geolocation) {
-    alert("Geolocation unsupported on this browser. Logging map center location instead.");
-    const center = map.getCenter();
-    return sendMLData(center.lat, center.lng);
+function logMLFeedback() {
+  if (!currentDest) {
+    alert('Search for a destination first, so we know where you were headed - then tap this again once you\'ve actually parked.');
+    return;
   }
 
-  // 2. Execute GPS lookup with explicit error callback and timeout limits
+  const now = Date.now();
+  if (now - lastMLLogAt < ML_LOG_COOLDOWN_MS) {
+    const waitSec = Math.ceil((ML_LOG_COOLDOWN_MS - (now - lastMLLogAt)) / 1000);
+    alert(`You already logged a parking spot recently - thanks! You can log again in about ${waitSec}s.`);
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    alert('This browser can\'t access your location, so we can\'t log where you parked. Please enable location access or try a different browser.');
+    return;
+  }
+
+  const btn = document.getElementById('ml-log-toggle');
+  if (btn) { btn.disabled = true; btn.innerText = 'Finding your location...'; }
+
   navigator.geolocation.getCurrentPosition(
     (position) => {
-      sendMLData(position.coords.latitude, position.coords.longitude);
+      if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
+      const { latitude, longitude, accuracy } = position.coords;
+
+      // A very poor fix (e.g. a rough wifi/cell-tower estimate) is not
+      // useful data and is likely to mislocate the entry - refuse rather
+      // than silently recording something misleading.
+      if (accuracy != null && accuracy > 500) {
+        alert(`Your location signal is too weak right now (~${Math.round(accuracy)}m accuracy) to log accurately. Please try again in an open area, away from buildings.`);
+        return;
+      }
+
+      pendingMLLogData = { lat: latitude, lon: longitude, accuracy };
+      openMLConfirmModal(latitude, longitude, accuracy);
     },
     (error) => {
-      console.warn("GPS Location error:", error);
-      alert(`Location access failed (${error.message}). Logging current map center coordinates as fallback.`);
-      const center = map.getCenter();
-      sendMLData(center.lat, center.lng);
+      if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
+      console.warn('GPS location error:', error);
+      alert('We couldn\'t get your location, so nothing was logged. Please allow location access and try again.');
     },
     {
-      enableHighAccuracy: false, // Set to false on mobile to prevent GPS hardware timeouts
+      enableHighAccuracy: false, // kept false on mobile to avoid GPS hardware timeouts
       timeout: 8000,
       maximumAge: 10000
     }
   );
+}
+
+function openMLConfirmModal(lat, lon, accuracy) {
+  const nearest = findNearestSegment(lat, lon);
+  const bodyEl = document.getElementById('ml-confirm-body');
+  const warnEl = document.getElementById('ml-confirm-warning');
+
+  if (nearest && nearest.distance <= 150) {
+    bodyEl.innerHTML = `You appear to be near <strong>${escapeHtml(nearest.name)}</strong> (about ${Math.round(nearest.distance)}m away).`;
+    warnEl.classList.add('hidden');
+  } else {
+    const distText = nearest ? `${Math.round(nearest.distance)}m away` : 'unknown';
+    bodyEl.innerHTML = `We couldn't match this to a known parking area on the map (nearest is ${distText}).`;
+    warnEl.textContent = 'This doesn\'t look like a mapped parking spot. Only confirm if you\'re sure this is right.';
+    warnEl.classList.remove('hidden');
+  }
+
+  document.getElementById('ml-confirm-accuracy').textContent =
+    accuracy != null ? `Location accuracy: ~${Math.round(accuracy)}m` : '';
+
+  document.getElementById('ml-confirm-modal').classList.remove('hidden');
+}
+
+function closeMLConfirmModal() {
+  document.getElementById('ml-confirm-modal').classList.add('hidden');
+  pendingMLLogData = null;
+}
+
+async function confirmMLLog() {
+  if (!pendingMLLogData) { closeMLConfirmModal(); return; }
+  const { lat, lon } = pendingMLLogData;
+  closeMLConfirmModal();
+
+  const btn = document.getElementById('ml-log-toggle');
+  if (btn) { btn.disabled = true; btn.innerText = 'Logging...'; }
+
+  try {
+    const payload = {
+      lat: lat,
+      lon: lon,
+      dest_lat: currentDest ? currentDest.lat : null,
+      dest_lon: currentDest ? currentDest.lon : null
+    };
+
+    const response = await fetch('/api/admin/ml_feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store'
+    });
+
+    const rawText = await response.text();
+    let resData;
+    try {
+      resData = JSON.parse(rawText);
+    } catch (e) {
+      throw new Error(`Unexpected server response (${response.status}).`);
+    }
+
+    if (response.ok) {
+      lastMLLogAt = Date.now();
+      alert('Thanks! Your parking spot was logged.');
+    } else {
+      alert(resData.error || 'Could not record your parking spot. Please try again.');
+    }
+  } catch (err) {
+    alert(`Network error: ${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
+  }
 }
 
 function openAdminModal(feature) {

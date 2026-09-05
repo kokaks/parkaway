@@ -150,9 +150,14 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,      # JS can't read the session cookie (mitigates XSS cookie theft)
     SESSION_COOKIE_SAMESITE="Lax",     # basic CSRF mitigation for the login/admin endpoints
     SESSION_COOKIE_SECURE=os.environ.get("RENDER") is not None,  # only require HTTPS in real deployment; allow local http dev
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=float(os.environ.get("ADMIN_SESSION_HOURS", "2"))),
     MAX_CONTENT_LENGTH=1 * 1024 * 1024,  # reject request bodies over 1MB (basic DoS/abuse guard)
 )
+
+# Google Analytics 4 measurement ID, injected into the page template only if
+# set. Leave GA4_MEASUREMENT_ID unset locally/for testing so analytics never
+# fires outside of the real production deployment.
+GA4_MEASUREMENT_ID = os.environ.get("GA4_MEASUREMENT_ID", "")
 
 
 # --------------------------------------------------------------------------
@@ -221,7 +226,7 @@ def _set_security_headers(response):
     # (clickjacking), and blocks plugin/object embeds entirely.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com https://www.googletagmanager.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://unpkg.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: https:; "
@@ -1042,6 +1047,7 @@ def index():
         center_lat=MAP_CENTER[0],
         center_lon=MAP_CENTER[1],
         type_colors=TYPE_COLORS,
+        ga4_id=GA4_MEASUREMENT_ID,
     )
 
 @app.route("/manifest.json")
@@ -1074,7 +1080,7 @@ def service_worker():
     js = """
     // Bump this on every deploy that changes app behavior. Changing the name
     // makes old caches orphaned so they get cleaned up in 'activate' below.
-    const CACHE_NAME = 'yerevan-parking-v2';
+    const CACHE_NAME = 'yerevan-parking-v3';
     const STATIC_ASSETS = [
         'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap',
         'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
@@ -1548,18 +1554,37 @@ def api_admin_login():
 
     session.permanent = True
     session["is_admin"] = True
-    return jsonify({"status": "ok"})
+    session["admin_login_at"] = time.time()
+    return jsonify({"status": "ok", "session_seconds": app.config["PERMANENT_SESSION_LIFETIME"].total_seconds()})
 
 
 @app.route("/api/admin/logout", methods=["POST"])
 def api_admin_logout():
     session.pop("is_admin", None)
+    session.pop("admin_login_at", None)
     return jsonify({"status": "ok"})
 
 
 @app.route("/api/admin/status")
 def api_admin_status():
-    return jsonify({"is_admin": bool(session.get("is_admin"))})
+    if not session.get("is_admin"):
+        return jsonify({"is_admin": False})
+
+    # Explicit, authoritative remaining-time check (in addition to Flask's
+    # own signed-cookie expiry) so the frontend can proactively log the
+    # device out and show a clear message the moment the session's time is
+    # up, rather than only discovering it on the next failed save/delete.
+    login_at = session.get("admin_login_at")
+    lifetime_s = app.config["PERMANENT_SESSION_LIFETIME"].total_seconds()
+    if login_at is not None:
+        remaining = lifetime_s - (time.time() - login_at)
+        if remaining <= 0:
+            session.pop("is_admin", None)
+            session.pop("admin_login_at", None)
+            return jsonify({"is_admin": False, "reason": "expired"})
+        return jsonify({"is_admin": True, "seconds_remaining": round(remaining)})
+
+    return jsonify({"is_admin": True, "seconds_remaining": round(lifetime_s)})
 
 
 @app.route("/api/admin/feature", methods=["POST"])

@@ -19,6 +19,23 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.js"></script>
 
+{% if ga4_id %}
+<!-- Google Analytics 4. Only injected when GA4_MEASUREMENT_ID is set on the
+     server, so local/dev instances never send analytics traffic. -->
+<script async src="https://www.googletagmanager.com/gtag/js?id={{ ga4_id }}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){ dataLayer.push(arguments); }
+  gtag('js', new Date());
+  // send_page_view stays on (default) for automatic visit/session counting;
+  // anonymize_ip is on as a privacy-conscious default.
+  gtag('config', '{{ ga4_id }}', { anonymize_ip: true });
+  window.GA4_ENABLED = true;
+</script>
+{% else %}
+<script>window.GA4_ENABLED = false;</script>
+{% endif %}
+
 <style>
   :root {
     --basalt-950: #14151a;
@@ -1002,6 +1019,59 @@ const PRESETS = [
   { name: 'Saryan Wine St', lat: 40.1840, lon: 44.5075 }
 ];
 
+// --------------------------------------------------------------------------
+// Google Analytics 4 helper + poster GPS attribution
+// --------------------------------------------------------------------------
+// Fires a GA4 custom event if analytics is configured; always safe to call
+// even when GA4_ENABLED is false (becomes a harmless no-op), so call sites
+// never need to check for GA4 themselves.
+function gaEvent(name, params) {
+  if (!window.GA4_ENABLED || typeof gtag !== 'function') return;
+  try {
+    gtag('event', name, params || {});
+  } catch (e) {
+    console.warn('GA4 event failed:', e);
+  }
+}
+
+// EDIT THESE to match your real poster locations before relying on this for
+// attribution. Since all 50 printed posters share one identical QR code (no
+// per-poster URL parameter), the only way to tell which poster someone
+// scanned is to compare their GPS position - once they grant location
+// access, which the app already requests for its normal "show my location"
+// feature - against these known poster placement clusters. radius_m is how
+// close someone needs to be to count as "at" that location; tune it to
+// roughly the area each poster cluster covers.
+const POSTER_LOCATIONS = [
+  { id: 'poster_site_1', label: 'Poster Site 1 (10 posters) - EDIT LAT/LON', lat: 40.1792, lon: 44.5152, radius_m: 150 },
+  { id: 'poster_site_2', label: 'Poster Site 2 (20 posters) - EDIT LAT/LON', lat: 40.1850, lon: 44.5100, radius_m: 150 },
+  { id: 'poster_site_3', label: 'Poster Site 3 (20 posters) - EDIT LAT/LON', lat: 40.1750, lon: 44.5200, radius_m: 150 },
+];
+let posterAttributionSent = false;
+
+function attributePosterScan(lat, lon) {
+  if (posterAttributionSent) return; // only fire once per page load
+  posterAttributionSent = true;
+
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const site of POSTER_LOCATIONS) {
+    const d = haversineMeters(lat, lon, site.lat, site.lon);
+    if (d < nearestDist) { nearestDist = d; nearest = site; }
+  }
+  if (!nearest) return;
+
+  const matched = nearestDist <= nearest.radius_m;
+  gaEvent('poster_scan_location', {
+    poster_location: matched ? nearest.label : 'unmatched',
+    poster_location_id: matched ? nearest.id : 'unmatched',
+    distance_m: Math.round(nearestDist),
+    matched: matched
+  });
+}
+
+// --------------------------------------------------------------------------
+
 let map, parkingLayer, destMarker;
 let recMarkers = [];
 let currentDest = null;
@@ -1025,6 +1095,10 @@ let userLat = null;
 let userLon = null;
 let geoWatchId = null;
 let hasCenteredOnUser = false;
+// Timestamp of the first keystroke in the destination search box since the
+// last destination was set/cleared. Used to measure how long someone spent
+// searching before picking a destination (GA4 'destination_selected' event).
+let searchStartedAt = null;
 
 // Helper function to escape HTML string attributes safely
 function escapeHtml(str) {
@@ -1045,9 +1119,27 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchTraffic();
   initSearchInput();
   initGeolocation();
+  initGenericClickTracking();
   setInterval(fetchTraffic, 15000);
   setInterval(fetchWeather, 60000);
 });
+
+// Broad, low-effort click tracking: reports every button press by its id
+// (or trimmed visible text as a fallback) as a GA4 'ui_click' event, so
+// overall interaction/click volume is visible in GA4 without having to wire
+// every single button by hand. Specific higher-value actions (destination
+// selection, admin login, parking log confirmation, etc.) still fire their
+// own more detailed named events elsewhere - this is just the general net.
+function initGenericClickTracking() {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    // Never report the admin password field or anything inside the login
+    // modal's input - only the button press itself, never typed content.
+    const label = btn.id || (btn.innerText || '').trim().slice(0, 40) || 'unlabeled_button';
+    gaEvent('ui_click', { element: label });
+  });
+}
 
 function initClock() {
   const clockEl = document.getElementById('clock');
@@ -1073,7 +1165,7 @@ function initMap() {
 
   map.on('click', (e) => {
     if (isAdminMode) return;
-    setDestination(e.latlng.lat, e.latlng.lng, `Custom Pin (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`);
+    setDestination(e.latlng.lat, e.latlng.lng, `Custom Pin (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`, 'map_click');
   });
 }
 
@@ -1092,6 +1184,7 @@ function initGeolocation() {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       updateUserLocation(pos);
+      attributePosterScan(pos.coords.latitude, pos.coords.longitude);
       startWatchingLocation();
     },
     (err) => {
@@ -1147,6 +1240,7 @@ function initSearchInput() {
   searchInput.addEventListener('input', (e) => {
     const val = e.target.value.trim();
     if (val.length > 0) {
+      if (searchStartedAt === null) searchStartedAt = Date.now();
       searchClearBtn.classList.remove('hidden');
     } else {
       searchClearBtn.classList.add('hidden');
@@ -1186,6 +1280,7 @@ function clearSearchInput() {
   searchClearBtn.classList.add('hidden');
   searchDropdown.classList.add('hidden');
   searchInput.focus();
+  searchStartedAt = null;
 }
 
 async function fetchSearchResults(query) {
@@ -1231,7 +1326,7 @@ function selectSearchLocation(item) {
   searchDropdown.classList.add('hidden');
 
   map.setView([item.lat, item.lon], 16);
-  setDestination(item.lat, item.lon, item.title);
+  setDestination(item.lat, item.lon, item.title, 'search');
 }
 
 // --------------------------------------------------------------------------
@@ -1331,13 +1426,13 @@ function renderPresets() {
     btn.innerText = p.name;
     btn.onclick = () => {
       map.setView([p.lat, p.lon], 16);
-      setDestination(p.lat, p.lon, p.name);
+      setDestination(p.lat, p.lon, p.name, 'preset');
     };
     grid.appendChild(btn);
   });
 }
 
-function setDestination(lat, lon, label) {
+function setDestination(lat, lon, label, method) {
   currentDest = { lat, lon, label };
 
   if (destMarker) map.removeLayer(destMarker);
@@ -1353,6 +1448,13 @@ function setDestination(lat, lon, label) {
 
   document.getElementById('destination-active').style.display = 'block';
   document.getElementById('dest-coords').innerText = `${label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+
+  const eventParams = { method: method || 'unknown', destination_label: label };
+  if (method === 'search' && searchStartedAt !== null) {
+    eventParams.search_duration_ms = Date.now() - searchStartedAt;
+  }
+  gaEvent('destination_selected', eventParams);
+  searchStartedAt = null; // reset for the next search
 
   fetchRecommendations(lat, lon);
 }
@@ -1557,6 +1659,7 @@ function collapseMobileSheet() {
 // --------------------------------------------------------------------------
 // Admin Curation & ML Feedback Logic
 // --------------------------------------------------------------------------
+let adminSessionPollTimer = null;
 
 function toggleAdminMode() {
   if (isAdminMode) {
@@ -1569,7 +1672,8 @@ function toggleAdminMode() {
   }
 
   // Entering: check whether we already have a valid session (e.g. logged in
-  // earlier this browser session) before bothering to prompt for a password.
+  // earlier this browser session, and it hasn't timed out yet) before
+  // bothering to prompt for a password.
   fetch('/api/admin/status', { cache: 'no-store' })
     .then(r => r.json())
     .then(({ is_admin }) => {
@@ -1593,6 +1697,7 @@ function setAdminModeUI(enabled) {
       map.pm.addControls({ position: 'topright', drawCircle: false, drawMarker: false });
       map.on('pm:create', onGeomanCreate);
     }
+    startAdminSessionPolling();
   } else {
     btn.classList.remove('active');
     btn.innerText = 'Admin / Curation Mode';
@@ -1601,6 +1706,34 @@ function setAdminModeUI(enabled) {
       map.off('pm:create', onGeomanCreate);
     }
     closeAdminModal();
+    stopAdminSessionPolling();
+  }
+}
+
+// Proactively checks whether the admin session has timed out, instead of
+// only discovering it the next time a save/delete happens to fail. Once the
+// session's time limit (ADMIN_SESSION_HOURS on the server, default 2h) is
+// up, this automatically exits Curation Mode on this device and explains
+// why, rather than leaving stale admin controls sitting on screen.
+function startAdminSessionPolling() {
+  stopAdminSessionPolling();
+  adminSessionPollTimer = setInterval(() => {
+    fetch('/api/admin/status', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(({ is_admin }) => {
+        if (!is_admin && isAdminMode) {
+          setAdminModeUI(false);
+          alert('Your admin session has timed out. Please log in again to keep editing.');
+        }
+      })
+      .catch(() => {}); // a transient network hiccup shouldn't force a logout
+  }, 60000); // check once a minute
+}
+
+function stopAdminSessionPolling() {
+  if (adminSessionPollTimer) {
+    clearInterval(adminSessionPollTimer);
+    adminSessionPollTimer = null;
   }
 }
 
@@ -1631,9 +1764,11 @@ function submitAdminLogin() {
     .then(r => r.json().then(body => ({ ok: r.ok, body })))
     .then(({ ok, body }) => {
       if (!ok) {
+        gaEvent('admin_login_failed', {});
         if (errField) errField.textContent = body.error || 'Login failed.';
         return;
       }
+      gaEvent('admin_login_success', {});
       closeAdminLoginModal();
       setAdminModeUI(true);
       loadParkingData();
@@ -1700,6 +1835,8 @@ function findNearestSegment(lat, lon) {
 }
 
 function logMLFeedback() {
+  gaEvent('parked_here_click', {});
+
   if (!currentDest) {
     alert('Search for a destination first, so we know where you were headed - then tap this again once you\'ve actually parked.');
     return;
@@ -1808,6 +1945,7 @@ async function confirmMLLog() {
 
     if (response.ok) {
       lastMLLogAt = Date.now();
+      gaEvent('parked_here_confirmed', { matched_segment: resData.matched_segment || 'none' });
       alert('Thanks! Your parking spot was logged.');
     } else {
       alert(resData.error || 'Could not record your parking spot. Please try again.');

@@ -668,6 +668,15 @@
     100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
   }
 
+  #modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 999; /* just below the modals themselves at z-index 1000 */
+    -webkit-tap-highlight-color: transparent;
+  }
+  #modal-backdrop.hidden { display: none; }
+
   #admin-modal, #admin-login-modal, #ml-confirm-modal {
     position: absolute;
     top: calc(75px + var(--safe-top));
@@ -936,7 +945,13 @@
 
     <div id="map"></div>
     <div id="hint-banner"><span class="dot"></span><span id="hint-text">Search address or click map to set destination</span></div>
-    
+
+    <!-- Full-screen backdrop shown behind any open modal. Without this,
+         buttons elsewhere on the page (like "I Parked Here") stay clickable
+         while a modal is open, letting someone stack up multiple concurrent
+         actions (e.g. multiple simultaneous GPS lookups) by tapping through. -->
+    <div id="modal-backdrop" class="hidden" onclick="handleBackdropClick()"></div>
+
     <!-- Admin Form Modal Overlay -->
     <div id="admin-modal" class="hidden">
       <h3 id="admin-modal-title">Edit Segment</h3>
@@ -1043,9 +1058,9 @@ function gaEvent(name, params) {
 // close someone needs to be to count as "at" that location; tune it to
 // roughly the area each poster cluster covers.
 const POSTER_LOCATIONS = [
-  { id: 'poster_site_1', label: 'Poster Site 1 (10 posters) - EDIT LAT/LON', lat: 40.193028, lon: 44.504262, radius_m: 100 },
-  { id: 'poster_site_2', label: 'Poster Site 2 (20 posters) - EDIT LAT/LON', lat: 40.185037, lon: 44.514993, radius_m: 100 },
-  { id: 'poster_site_3', label: 'Poster Site 3 (20 posters) - EDIT LAT/LON', lat: 40.182709, lon: 44.514575, radius_m: 100 },
+  { id: 'poster_site_1', label: 'Poster Site 1 (10 posters) - EDIT LAT/LON', lat: 40.1792, lon: 44.5152, radius_m: 150 },
+  { id: 'poster_site_2', label: 'Poster Site 2 (20 posters) - EDIT LAT/LON', lat: 40.1850, lon: 44.5100, radius_m: 150 },
+  { id: 'poster_site_3', label: 'Poster Site 3 (20 posters) - EDIT LAT/LON', lat: 40.1750, lon: 44.5200, radius_m: 150 },
 ];
 let posterAttributionSent = false;
 
@@ -1155,10 +1170,18 @@ function initMap() {
   map = L.map('map', { zoomControl: false }).setView(CENTER, 15);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  // Standard OpenStreetMap raster tiles: no API key, no usage-tracking
+  // account needed. Previously used CARTO's "Voyager" style
+  // (basemaps.cartocdn.com), which started requiring an API key and
+  // watermarking unauthenticated tiles with "API KEY REQUIRED" as of late
+  // August 2026 - switching provider entirely avoids relying on any single
+  // company's free-tier terms not changing again. Visual style is the
+  // standard OSM look (a bit more colorful/detailed than Voyager's muted
+  // style) rather than a functional change.
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    subdomains: 'abcd',
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    subdomains: 'abc',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
   loadParkingData();
@@ -1333,11 +1356,15 @@ function selectSearchLocation(item) {
 // Core Parking & Recommender Engine Interactions
 // --------------------------------------------------------------------------
 
-function loadParkingData() {
+function loadParkingData(retryCount) {
+  retryCount = retryCount || 0;
   if (parkingLayer) map.removeLayer(parkingLayer);
 
   fetch('/api/parking', { cache: 'no-store' })
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) throw new Error(`/api/parking returned ${r.status}`);
+      return r.json();
+    })
     .then(data => {
       const features = [];
       const rawData = Array.isArray(data) ? data : (data.features || []);
@@ -1414,7 +1441,22 @@ function loadParkingData() {
         }
       }).addTo(map);
     })
-    .catch(err => console.error("Error loading parking data:", err));
+    .catch(err => {
+      console.error("Error loading parking data:", err);
+      // The very first load on a cold-starting Render instance (or a brief
+      // network hiccup) can fail outright, and previously there was no
+      // recovery from that - the map would just silently stay empty of
+      // parking segments until something else happened to reload the page.
+      // Retry a few times with increasing delay before giving up.
+      const MAX_RETRIES = 4;
+      if (retryCount < MAX_RETRIES) {
+        const delayMs = 1500 * Math.pow(1.6, retryCount); // ~1.5s, 2.4s, 3.8s, 6.1s
+        console.warn(`Retrying parking data load (attempt ${retryCount + 1}/${MAX_RETRIES}) in ${Math.round(delayMs)}ms...`);
+        setTimeout(() => loadParkingData(retryCount + 1), delayMs);
+      } else {
+        console.error("Giving up on loading parking data after several retries.");
+      }
+    });
 }
 
 function renderPresets() {
@@ -1743,11 +1785,13 @@ function openAdminLoginModal() {
   if (pwField) pwField.value = '';
   if (errField) errField.textContent = '';
   document.getElementById('admin-login-modal').classList.remove('hidden');
+  showModalBackdrop();
   if (pwField) pwField.focus();
 }
 
 function closeAdminLoginModal() {
   document.getElementById('admin-login-modal').classList.add('hidden');
+  hideModalBackdrop();
 }
 
 function submitAdminLogin() {
@@ -1834,6 +1878,9 @@ function findNearestSegment(lat, lon) {
   return nearest ? { name: nearest.name || 'Unnamed segment', distance: nearestDist } : null;
 }
 
+let mlLookupInFlight = false;
+let mlRequestToken = 0;
+
 function logMLFeedback() {
   gaEvent('parked_here_click', {});
 
@@ -1854,18 +1901,38 @@ function logMLFeedback() {
     return;
   }
 
+  // Guards against the actual cause of the "takes forever then fails" bug:
+  // repeated presses used to each fire their own GPS lookup, stacking up
+  // multiple concurrent requests that made the device's location hardware
+  // slower and more likely to time out. The button being disabled below
+  // already prevents this in the normal flow, but this flag is a second,
+  // explicit line of defense.
+  if (mlLookupInFlight) return;
+  mlLookupInFlight = true;
+  const thisToken = ++mlRequestToken;
+
   const btn = document.getElementById('ml-log-toggle');
+  // Stays disabled for the ENTIRE flow - through the GPS lookup AND while
+  // the confirm modal is open - not just during the lookup. Previously it
+  // was re-enabled as soon as a fix came back, which meant the button
+  // (still visible and clickable behind the confirm modal, since modals
+  // didn't block clicks to the rest of the page) could be pressed again
+  // while a previous request's modal was still open, kicking off a second
+  // concurrent GPS lookup. It's only re-enabled now once the whole flow
+  // actually finishes (Cancel, a failed lookup, or a completed submit).
   if (btn) { btn.disabled = true; btn.innerText = 'Finding your location...'; }
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
-      if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
+      mlLookupInFlight = false;
+      if (thisToken !== mlRequestToken) return; // a newer press has since superseded this one
       const { latitude, longitude, accuracy } = position.coords;
 
       // A very poor fix (e.g. a rough wifi/cell-tower estimate) is not
       // useful data and is likely to mislocate the entry - refuse rather
       // than silently recording something misleading.
       if (accuracy != null && accuracy > 500) {
+        if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
         alert(`Your location signal is too weak right now (~${Math.round(accuracy)}m accuracy) to log accurately. Please try again in an open area, away from buildings.`);
         return;
       }
@@ -1874,6 +1941,8 @@ function logMLFeedback() {
       openMLConfirmModal(latitude, longitude, accuracy);
     },
     (error) => {
+      mlLookupInFlight = false;
+      if (thisToken !== mlRequestToken) return; // a newer press has since superseded this one
       if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
       console.warn('GPS location error:', error);
       alert('We couldn\'t get your location, so nothing was logged. Please allow location access and try again.');
@@ -1905,11 +1974,18 @@ function openMLConfirmModal(lat, lon, accuracy) {
     accuracy != null ? `Location accuracy: ~${Math.round(accuracy)}m` : '';
 
   document.getElementById('ml-confirm-modal').classList.remove('hidden');
+  showModalBackdrop();
 }
 
 function closeMLConfirmModal() {
   document.getElementById('ml-confirm-modal').classList.add('hidden');
+  hideModalBackdrop();
   pendingMLLogData = null;
+  // Re-enable the button here too (not just after a successful submit),
+  // since Cancel is a valid end to the flow and shouldn't leave the button
+  // stuck disabled.
+  const btn = document.getElementById('ml-log-toggle');
+  if (btn) { btn.disabled = false; btn.innerText = 'I Parked Here'; }
 }
 
 async function confirmMLLog() {
@@ -1957,6 +2033,27 @@ async function confirmMLLog() {
   }
 }
 
+// --------------------------------------------------------------------------
+// Shared modal backdrop: shown behind whichever modal is open, so buttons
+// elsewhere on the page can't be tapped through to it (this was the actual
+// cause of the "I Parked Here" bug where repeated presses + Cancel stacked
+// up multiple concurrent GPS lookups - the confirm modal never blocked
+// clicks to the button underneath it).
+// --------------------------------------------------------------------------
+function showModalBackdrop() {
+  document.getElementById('modal-backdrop').classList.remove('hidden');
+}
+
+function hideModalBackdrop() {
+  document.getElementById('modal-backdrop').classList.add('hidden');
+}
+
+function handleBackdropClick() {
+  if (!document.getElementById('admin-modal').classList.contains('hidden')) { closeAdminModal(); return; }
+  if (!document.getElementById('admin-login-modal').classList.contains('hidden')) { closeAdminLoginModal(); return; }
+  if (!document.getElementById('ml-confirm-modal').classList.contains('hidden')) { closeMLConfirmModal(); return; }
+}
+
 function openAdminModal(feature) {
   const props = feature.properties || feature;
   const geom = feature.geometry || {};
@@ -1968,10 +2065,12 @@ function openAdminModal(feature) {
   document.getElementById('edit-coords').value = geom.coordinates ? JSON.stringify(geom.coordinates) : '';
 
   document.getElementById('admin-modal').classList.remove('hidden');
+  showModalBackdrop();
 }
 
 function closeAdminModal() {
   document.getElementById('admin-modal').classList.add('hidden');
+  hideModalBackdrop();
   // Remove Geoman's raw drawn layer if one is pending. On a successful save,
   // loadParkingData() (called right after this) redraws the authoritative
   // version from the server, so this temp layer must not be left behind as

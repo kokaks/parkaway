@@ -38,32 +38,21 @@
 
 <style>
   :root {
-    --basalt-950: #111318;
-    --basalt-900: #191b22;
-    --basalt-800: #21232c;
-    --basalt-700: #2d303b;
-    --basalt-line: #383b47;
-    --fog: #9599a8;
-    --paper: #f4f5f9;
+    --basalt-950: #14151a;
+    --basalt-900: #1b1d24;
+    --basalt-800: #24262f;
+    --basalt-700: #32343f;
+    --basalt-line: #3a3d4a;
+    --fog: #9498a6;
+    --paper: #eef0f4;
     --apricot: #f5a536;
     --apricot-dim: #7a5a2a;
     --tuff-pink: #d9808a;
-    --leaf: #30c47a;
-    --alert: #ef5b50;
+    --leaf: #34c77b;
+    --alert: #e2574c;
     --sapphire: #4d8ff0;
-    --unavailable: #f6a623;
-
-    /* Consistent spacing & shape scale, used by the newer/refreshed
-       components below. Older rules that still hard-code pixel values are
-       untouched - safe to leave mixed since this is a purely additive
-       system, not a forced migration. */
-    --radius-sm: 8px;
-    --radius-md: 14px;
-    --radius-lg: 20px;
-    --shadow-sm: 0 2px 10px rgba(0,0,0,.28);
-    --shadow-md: 0 10px 28px rgba(0,0,0,.38);
-    --shadow-lg: 0 20px 56px rgba(0,0,0,.5);
-
+    --unavailable: #f39c12;
+    
     /* Device Safe Area insets to avoid notches, islands, and rounded corners */
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -216,13 +205,6 @@
     align-items: center;
     justify-content: space-between;
   }
-  .title-icon {
-    width: 14px;
-    height: 14px;
-    margin-right: 7px;
-    flex-shrink: 0;
-    vertical-align: -2px;
-  }
 
   /* Destination picker */
   #destination-hint {
@@ -249,15 +231,14 @@
     font-size: 13px;
     font-weight: 500;
     padding: 12px 10px;
-    border-radius: var(--radius-sm);
+    border-radius: 8px;
     cursor: pointer;
     text-align: left;
     min-height: 44px;
-    transition: border-color .15s, background .15s, transform .1s;
+    transition: border-color .15s, background .15s;
     touch-action: manipulation;
   }
-  .preset-btn:hover { border-color: var(--apricot); background: var(--basalt-700); }
-  .preset-btn:active { transform: scale(0.97); }
+  .preset-btn:hover, .preset-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
 
   #destination-active {
     display: none;
@@ -286,14 +267,11 @@
     gap: 12px;
     background: var(--basalt-800);
     border: 1px solid var(--basalt-line);
-    border-radius: var(--radius-md);
-    padding: 13px 14px;
+    border-radius: 12px;
+    padding: 12px;
     margin-bottom: 10px;
     align-items: center;
-    box-shadow: var(--shadow-sm);
-    transition: transform .12s, border-color .15s;
   }
-  .rec-card:hover { border-color: var(--apricot-dim); }
   .rec-rank {
     font-family: 'Space Grotesk', sans-serif;
     font-weight: 700;
@@ -304,7 +282,6 @@
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(245,165,54,.35);
   }
   .gauge {
     width: 46px; height: 46px;
@@ -339,17 +316,17 @@
   }
   .pill {
     font-size: 10px;
-    font-weight: 700;
-    padding: 3px 8px;
+    font-weight: 600;
+    padding: 2px 7px;
     border-radius: 20px;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .03em;
   }
-  .pill-free   { background: rgba(48,196,122,.16); color: var(--leaf); }
-  .pill-paid   { background: rgba(239,91,80,.16); color: var(--alert); }
-  .pill-lot    { background: rgba(77,143,240,.16); color: var(--sapphire); }
-  .pill-unavailable { background: rgba(246,166,35,.16); color: var(--unavailable); }
-  .pill-unspecified { background: rgba(149,153,168,.16); color: var(--fog); }
+  .pill-free   { background: rgba(52,199,123,.15); color: var(--leaf); }
+  .pill-paid   { background: rgba(226,87,76,.15); color: var(--alert); }
+  .pill-lot    { background: rgba(77,143,240,.15); color: var(--sapphire); }
+  .pill-unavailable { background: rgba(243,156,18,.15); color: var(--unavailable); }
+  .pill-unspecified { background: rgba(148,152,166,.15); color: var(--fog); }
 
   #rec-empty {
     font-size: 13px;
@@ -364,26 +341,23 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 4px;
+    padding: 11px 0;
     border-bottom: 1px solid var(--basalt-line);
     font-size: 13px;
-    border-radius: var(--radius-sm);
-    transition: background .15s;
   }
-  .traffic-card:hover { background: var(--basalt-800); }
   .traffic-card:last-child { border-bottom: none; }
   .traffic-name { color: var(--paper); font-weight: 500; }
   .traffic-badge {
     font-size: 10.5px;
     font-weight: 700;
-    padding: 4px 10px;
+    padding: 3px 9px;
     border-radius: 20px;
     text-transform: uppercase;
     letter-spacing: .04em;
   }
-  .badge-Low    { background: rgba(48,196,122,.16); color: var(--leaf); }
-  .badge-Medium { background: rgba(245,165,54,.16); color: var(--apricot); }
-  .badge-Heavy  { background: rgba(239,91,80,.16); color: var(--alert); }
+  .badge-Low    { background: rgba(52,199,123,.15); color: var(--leaf); }
+  .badge-Medium { background: rgba(245,165,54,.15); color: var(--apricot); }
+  .badge-Heavy  { background: rgba(226,87,76,.15); color: var(--alert); }
 
   .overall-banner {
     display: flex;
@@ -401,10 +375,7 @@
   #map-wrap { position: relative; width: 100%; height: 100%; }
   #map { height: 100%; width: 100%; background: var(--basalt-950); }
 
-  /* Esri's Light Gray Canvas basemap is already deliberately muted, so it
-     no longer needs the darkening filter that was tuned for the previous,
-     much busier/more colorful tile providers. */
-  .leaflet-tile-pane { filter: none; }
+  .leaflet-tile-pane { filter: saturate(0.85) brightness(0.95); }
 
   /* ---------------- Top UI Overlays ---------------- */
   
@@ -570,8 +541,7 @@
     transition: all .2s ease;
     touch-action: manipulation;
   }
-  .admin-btn:hover { border-color: var(--apricot); background: var(--basalt-700); }
-  .admin-btn:active { transform: scale(0.97); }
+  .admin-btn:hover, .admin-btn:active { border-color: var(--apricot); background: var(--basalt-700); }
   
   .admin-btn.active {
     background: var(--apricot);
@@ -916,7 +886,7 @@
     <div id="sidebar-scroll">
 
       <div class="section">
-        <div class="section-title"><span style="display:flex;align-items:center;"><svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7.58 7-13A7 7 0 0 0 5 9c0 5.42 7 13 7 13Z"/><circle cx="12" cy="9" r="2.5"/></svg>Destination</span></div>
+        <div class="section-title">Destination</div>
         <div id="destination-hint">Search an address above, click anywhere on the map, or jump to a landmark below.</div>
         <div class="preset-grid" id="presets"></div>
         <div id="destination-active">
@@ -927,7 +897,7 @@
       </div>
 
       <div class="section">
-        <div class="section-title"><span style="display:flex;align-items:center;"><svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>Top 3 Recommended Spots</span></div>
+        <div class="section-title">Top 3 Recommended Spots</div>
         <div id="rec-list">
           <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
         </div>
@@ -936,7 +906,7 @@
       <div class="section" style="border-bottom:none;">
         <div class="overall-banner">
           <div>
-            <div class="section-title" style="margin-bottom:2px;"><span style="display:flex;align-items:center;"><svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Live Traffic &middot; Kentron</span></div>
+            <div class="section-title" style="margin-bottom:2px;">Live Traffic &middot; Kentron</div>
             <div style="font-size:11.5px;color:var(--fog);">by street, updated every 15s</div>
           </div>
           <div class="big" id="overall-level" style="color:var(--apricot)">—</div>
@@ -1200,49 +1170,19 @@ function initMap() {
   map = L.map('map', { zoomControl: false }).setView(CENTER, 15);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-  // Esri's "Light Gray Canvas" basemap: a deliberately minimal, muted grey
-  // map with faint roads/water and light labels - no API key needed (this
-  // is one of Esri's legacy keyless REST tile services, stable and free for
-  // this kind of use for years). It's a much better fit here than a
-  // standard, busy street map too: with parking segments overlaid in bold
-  // red/green/grey, a quiet neutral base makes those colors the clear focal
-  // point instead of competing with dense street-map detail.
-  //
-  // A second, separate labels layer is added on top (Esri splits the base
-  // colors and the place-name labels into two tile layers for this style).
-  //
-  // Automatic fallback: if this basemap ever starts failing to load tiles
-  // (the exact failure mode that broke the previous CARTO tiles, when they
-  // began requiring a paid API key with no warning), the app detects
-  // repeated tile errors and silently swaps to plain OpenStreetMap tiles
-  // instead of leaving a broken/blank map on screen.
-  const grayBase = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 19, maxNativeZoom: 16, attribution: '&copy; Esri &mdash; Esri, DeLorme, NAVTEQ' }
-  ).addTo(map);
-  const grayLabels = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 19, maxNativeZoom: 16, pane: 'shadowPane' } // renders above the base but below markers/lines
-  ).addTo(map);
-
-  let tileErrorCount = 0;
-  let fallbackActive = false;
-  function onTileError() {
-    if (fallbackActive) return;
-    tileErrorCount++;
-    if (tileErrorCount < 6) return; // a couple of dropped tiles is normal; a burst means the provider is down
-    fallbackActive = true;
-    console.warn('Primary basemap failed repeatedly - falling back to OpenStreetMap tiles.');
-    map.removeLayer(grayBase);
-    map.removeLayer(grayLabels);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      subdomains: 'abc',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-  }
-  grayBase.on('tileerror', onTileError);
-  grayLabels.on('tileerror', onTileError);
+  // Standard OpenStreetMap raster tiles: no API key, no usage-tracking
+  // account needed. Previously used CARTO's "Voyager" style
+  // (basemaps.cartocdn.com), which started requiring an API key and
+  // watermarking unauthenticated tiles with "API KEY REQUIRED" as of late
+  // August 2026 - switching provider entirely avoids relying on any single
+  // company's free-tier terms not changing again. Visual style is the
+  // standard OSM look (a bit more colorful/detailed than Voyager's muted
+  // style) rather than a functional change.
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    subdomains: 'abc',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
 
   loadParkingData();
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"><meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#14151a" />
 <meta name="apple-mobile-web-app-title" content="parkaway" />
@@ -103,6 +103,9 @@
 
   html, body {
     margin: 0; padding: 0;
+    position: fixed;            /* the document can never scroll or rubber-band under the sheet */
+    top: 0; left: 0;
+    overscroll-behavior: none;
     height: 100vh;
     height: 100dvh;
     width: 100vw;
@@ -153,8 +156,24 @@
     transform: translateY(0);
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  #sidebar.mode-dest { max-height: 58dvh; }
-  #sidebar.mode-search { height: calc(100dvh - var(--safe-top) - 6px); }
+  /* Results view: at most ~40% of the screen (its list scrolls inside) */
+  #sidebar.mode-dest { max-height: 42dvh; }
+  /* Search view: about half the screen, and it rides above the on-screen keyboard
+     (--kb / --vvh are kept up to date from window.visualViewport by the script) */
+  #sidebar.mode-search {
+    bottom: var(--kb, 0px);
+    height: min(50dvh, calc(var(--vvh, 100dvh) - var(--safe-top) - 12px));
+  }
+  /* compact header so all three recommendations fit */
+  #sidebar.mode-dest .dest-label { display: none; }
+  #sidebar.mode-dest #destination-active { padding: 12px 44px 0 2px; }
+  #sidebar.mode-dest #destination-active .coord {
+    font-size: 17px; margin-top: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #sidebar.mode-dest #clear-destination { top: 6px; }
+  #sidebar.mode-dest .section-title { font-size: 17px; margin: 8px 0 0; }
+  #sidebar.mode-dest .rec-card { padding: 8px 0; }
 
   /* Collapsed: only the drag handle + search bar peek out (JS constant in
      setupSheetSwipe() must match the 80px here) */
@@ -1109,6 +1128,9 @@
       left: 12px;
       width: 420px;
     }
+    /* on a wide screen the map is beside the panel, so it may use the full height */
+    #sidebar.mode-search { height: calc(100dvh - var(--safe-top) - 6px); }
+    #sidebar.mode-dest { max-height: 70dvh; }
     #layers-sheet { left: 12px; right: auto; width: 420px; }
   }
   .preset-btn::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7' fill='%234a4d5a'/%3E%3Cg transform='translate(3.996 3.996) scale(0.667)' fill='none' stroke='%23eef0f4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); border-radius: 7px; }
@@ -1810,7 +1832,7 @@ function setDestination(lat, lon, label, method) {
   destMarker = L.marker([lat, lon], { icon: destIcon }).addTo(map);
 
   document.getElementById('destination-active').style.display = 'block';
-  document.getElementById('dest-coords').innerText = `${label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+  document.getElementById('dest-coords').innerText = label.includes('(') ? label : `${label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
 
   const eventParams = { method: method || 'unknown', destination_label: label };
   if (method === 'search' && searchStartedAt !== null) {
@@ -2604,6 +2626,31 @@ function updateTrafficBadge(data) {
     el.textContent = data.overall_level;
   });
 }
+
+// --- Keep the page from scrolling, and the sheet above the on-screen keyboard ---------------
+// iOS pans the page when a text field is focused and rubber-bands it when you drag on a
+// non-scrolling part of the sheet. The CSS pins the document; this covers the rest.
+function syncViewport() {
+  const vv = window.visualViewport;
+  if (vv) {
+    const root = document.documentElement.style;
+    root.setProperty('--vvh', vv.height + 'px');
+    root.setProperty('--kb', Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + 'px');
+  }
+  if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncViewport);
+  window.visualViewport.addEventListener('scroll', syncViewport);
+}
+window.addEventListener('scroll', syncViewport, { passive: true });
+// Vertical drags only do something on the map and inside the sheet's own scrolling areas.
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 1) return; // pinch-zoom on the map
+  if (!e.target.closest('#sidebar-scroll, #layers-sheet, #menu-drawer, #admin-modal, #admin-login-modal, #map, #mobile-sheet-handle')) {
+    e.preventDefault();
+  }
+}, { passive: false });
 
 function initSheetUI() {
   const input = document.getElementById('search-input');

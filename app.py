@@ -125,7 +125,37 @@ YEREVAN_STREET_SYNONYMS = {
 }
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db').replace("postgres://", "postgresql://", 1)
+def _resolve_database_url() -> str:
+    """
+    Normalises DATABASE_URL and matches its driver to what is actually installed.
+    Render hands out postgres:// or postgresql:// URLs; SQLAlchemy then defaults to
+    psycopg2, while a postgresql+psycopg:// URL needs psycopg (v3). Whichever one
+    the URL asks for, fall back to the other if only that one is installed, so a
+    mismatch between the URL and requirements.txt can't crash the deploy.
+    """
+    import importlib.util
+    url = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db')
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if not url.startswith("postgresql"):
+        return url
+
+    scheme, rest = url.split("://", 1)
+    wanted = scheme.split("+", 1)[1] if "+" in scheme else None
+    have_v3 = importlib.util.find_spec("psycopg") is not None
+    have_v2 = importlib.util.find_spec("psycopg2") is not None
+
+    driver = wanted
+    if wanted in (None, "psycopg2") and not have_v2 and have_v3:
+        driver = "psycopg"
+    elif wanted == "psycopg" and not have_v3 and have_v2:
+        driver = "psycopg2"
+    if not (have_v2 or have_v3):
+        print("[WARNING] No PostgreSQL driver installed. Add 'psycopg[binary]' (or 'psycopg2-binary') to requirements.txt.")
+    return f"postgresql+{driver}://{rest}" if driver else f"postgresql://{rest}"
+
+
+app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_url()
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 

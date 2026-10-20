@@ -145,13 +145,23 @@ def _resolve_database_url() -> str:
     have_v3 = importlib.util.find_spec("psycopg") is not None
     have_v2 = importlib.util.find_spec("psycopg2") is not None
 
+    # Always name the driver explicitly. Newer SQLAlchemy releases changed what a bare
+    # postgresql:// URL means (psycopg2 -> psycopg v3), so relying on the default breaks
+    # whenever the installed SQLAlchemy and the installed driver disagree.
     driver = wanted
-    if wanted in (None, "psycopg2") and not have_v2 and have_v3:
+    if wanted in (None, "psycopg2") and have_v2:
+        driver = "psycopg2"
+    elif wanted in (None, "psycopg2") and have_v3:
         driver = "psycopg"
     elif wanted == "psycopg" and not have_v3 and have_v2:
         driver = "psycopg2"
+    print(f"[db] PostgreSQL drivers installed: psycopg2={have_v2}, psycopg={have_v3}; "
+          f"URL asked for '{wanted or 'default'}', using '{driver or 'psycopg2 (SQLAlchemy default)'}'.")
     if not (have_v2 or have_v3):
-        print("[WARNING] No PostgreSQL driver installed. Add 'psycopg[binary]' (or 'psycopg2-binary') to requirements.txt.")
+        raise RuntimeError(
+            "DATABASE_URL points at PostgreSQL but no PostgreSQL driver is installed in this build. "
+            "Add 'psycopg2-binary' to requirements.txt (repo root), push, and check the Render build log "
+            "shows it being installed.")
     return f"postgresql+{driver}://{rest}" if driver else f"postgresql://{rest}"
 
 
@@ -2255,4 +2265,3 @@ if __name__ == "__main__":
     host = "0.0.0.0" if os.environ.get("PORT") or os.environ.get("RENDER") else "127.0.0.1"
     print(f"[server] Starting Yerevan Smart Parking Recommender server on {host}:{port} (debug={debug_mode})")
     app.run(host=host, port=port, debug=debug_mode)
-  

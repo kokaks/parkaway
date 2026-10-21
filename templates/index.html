@@ -73,12 +73,12 @@
     --sapphire: #4d8ff0;
     --unavailable: #f39c12;
 
-    /* Text is white (like Yandex); icons keep the apricot accent. */
+    /* Text is white; icons keep the apricot accent. */
     --ui-text: var(--paper);
     --ui-icon: var(--apricot);
-    /* Floating control surface (buttons, pills) sitting on top of the map */
     --float-bg: rgba(20, 21, 26, 0.94);
-    --sheet-radius: 24px;
+    --sheet-radius: 28px;
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
     /* Device Safe Area insets to avoid notches, islands, and rounded corners */
     --safe-top: env(safe-area-inset-top, 0px);
@@ -86,20 +86,14 @@
     --safe-left: env(safe-area-inset-left, 0px);
     --safe-right: env(safe-area-inset-right, 0px);
 
-    /* Single-colour line icons (used through CSS masks so they take currentColor) */
-    --i-menu: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M4 12h16M4 17h16'/%3E%3C/svg%3E");
+    /* Single-colour line icons (CSS masks, so they take currentColor) */
     --i-layers: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='12' height='12' rx='3.5'/%3E%3Cpath d='M8.5 20.5h8a4 4 0 0 0 4-4v-8'/%3E%3C/svg%3E");
-    --i-search: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='m15.5 15.5 5 5'/%3E%3C/svg%3E");
-    --i-route: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5.5' cy='19.5' r='2.2'/%3E%3Ccircle cx='18.5' cy='6.5' r='2.2'/%3E%3Cpath d='M7.7 19.5H14a3.25 3.25 0 0 0 0-6.5H10a3.25 3.25 0 0 1 0-6.5h6.3'/%3E%3C/svg%3E");
-    --i-parking: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/svg%3E");
+    --i-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E");
+    --i-clock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 7.500V12l3 2'/%3E%3C/svg%3E");
     --i-locate: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 19.5 20 12 16 4.5 20z'/%3E%3C/svg%3E");
-    --i-close: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 6 12 12M18 6 6 18'/%3E%3C/svg%3E");
   }
 
-  * {
-    box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent;
-  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   html, body {
     margin: 0; padding: 0;
@@ -114,15 +108,15 @@
     font-family: 'Inter', sans-serif;
     overflow: hidden;
     touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
   }
-
+  input { -webkit-user-select: text; user-select: text; }
   button { font-family: inherit; }
-
   .display { font-family: 'Space Grotesk', sans-serif; }
+  .hidden { display: none !important; }
 
-  /* Mask-based icon helper: <span class="ico" style="--icon:var(--i-menu)"> or
-     any .has-ico element (the icon is drawn by ::before so button text can be
-     rewritten by script without losing it). */
+  /* Mask-based icon helper: any element with --icon set, or .has-ico (drawn by ::before) */
   .ico, .has-ico::before {
     content: "";
     display: inline-block;
@@ -134,70 +128,47 @@
             mask: var(--icon) center / contain no-repeat;
   }
 
-  #app {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-    height: 100dvh;
-  }
+  /* Every tappable thing gives a little physical feedback */
+  .press { transition: transform .15s var(--ease), background-color .15s; }
+  .press:active { transform: scale(.97); }
 
-  /* ---------------- Bottom sheet (was the sidebar) ---------------- */
+  #app { position: relative; width: 100vw; height: 100vh; height: 100dvh; }
+
+  /* ================= Bottom sheet ================= */
   #sidebar {
     position: absolute;
     left: 0; right: 0; bottom: 0;
     max-height: calc(100dvh - var(--safe-top) - 6px);
     background: var(--basalt-900);
     border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
-    box-shadow: 0 -6px 24px rgba(0,0,0,.45);
+    box-shadow: 0 -8px 32px rgba(0,0,0,.45);
     display: flex;
     flex-direction: column;
     z-index: 900;
     padding-bottom: var(--safe-bottom);
     transform: translateY(0);
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.35s var(--ease);
   }
-  /* Results view: at most ~40% of the screen (its list scrolls inside) */
-  #sidebar.mode-dest { max-height: 42dvh; }
-  /* Search view: about half the screen, and it rides above the on-screen keyboard
-     (--kb / --vvh are kept up to date from window.visualViewport by the script) */
+  #sidebar.mode-dest { max-height: 44dvh; }
+  #sidebar.mode-traffic { max-height: 50dvh; }
+  /* Search: about half the screen, riding above the on-screen keyboard
+     (--kb / --vvh are kept current from window.visualViewport by the script) */
   #sidebar.mode-search {
     bottom: var(--kb, 0px);
     height: min(50dvh, calc(var(--vvh, 100dvh) - var(--safe-top) - 12px));
   }
-  /* compact header so all three recommendations fit */
-  #sidebar.mode-dest .dest-label { display: none; }
-  #sidebar.mode-dest #destination-active { padding: 12px 44px 0 2px; }
-  #sidebar.mode-dest #destination-active .coord {
-    font-size: 17px; margin-top: 0;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  #sidebar.mode-dest #clear-destination { top: 6px; }
-  #sidebar.mode-dest .section-title { font-size: 17px; margin: 8px 0 0; }
-  #sidebar.mode-dest .rec-card { padding: 8px 0; }
 
-  /* Collapsed: only the drag handle + search bar peek out (JS constant in
-     setupSheetSwipe() must match the 80px here) */
-  #sidebar.sheet-collapsed {
-    transform: translateY(calc(100% - 80px - var(--safe-bottom)));
-  }
+  /* Collapsed: handle + the Where to? pill peek out (88px must match setupSheetSwipe) */
+  #sidebar.sheet-collapsed { transform: translateY(calc(100% - 88px - var(--safe-bottom))); }
 
-  /* Drag handle */
   #mobile-sheet-handle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 9px 0 8px;
     cursor: pointer;
     touch-action: none;
-    position: relative;
     flex-shrink: 0;
   }
-  .handle-bar {
-    width: 24px;
-    height: 4px;
-    background: #4b4e5c;
-    border-radius: 2px;
-  }
+  .handle-bar { width: 36px; height: 4px; background: #4b4e5c; border-radius: 2px; }
 
   #sidebar-scroll {
     overflow-y: auto;
@@ -209,1026 +180,796 @@
   }
   #sidebar-scroll::-webkit-scrollbar { width: 0; }
 
-  /* Floating row that rides on top of the sheet: Where to? / trip status / locate */
+  /* Row that rides above the sheet: locate (left), trip status (right) */
   .sheet-float {
     position: absolute;
-    left: calc(12px + var(--safe-left));
-    right: calc(12px + var(--safe-right));
+    left: calc(14px + var(--safe-left));
+    right: calc(14px + var(--safe-right));
     bottom: calc(100% + 12px);
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
     pointer-events: none;
   }
   .sheet-float > * { pointer-events: auto; }
   #sidebar.mode-search .sheet-float { display: none; }
 
-  .pill-btn {
-    height: 48px;
-    border-radius: 18px;
-    padding: 0 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: var(--float-bg);
-    border: none;
-    color: var(--ui-text);
-    font-size: 17px;
-    font-weight: 500;
-    white-space: nowrap;
-    cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0,0,0,.35);
-    touch-action: manipulation;
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-  .pill-btn:active { background: var(--basalt-800); }
-  .pill-btn.has-ico::before { color: var(--ui-icon); }
-  .pill-btn.hidden { display: none; }
-
   #locate-btn {
-    margin-left: auto;
-    width: 56px; height: 56px;
+    width: 52px; height: 52px;
     border-radius: 50%;
     border: none;
     background: var(--float-bg);
     color: var(--ui-icon);
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
     cursor: pointer;
     flex-shrink: 0;
-    touch-action: manipulation;
   }
-  #locate-btn:active { background: var(--basalt-800); }
+  #locate-btn.busy .ico { animation: spin 1s linear infinite; }
 
-  /* ---------------- Search row ---------------- */
-  #search-bar-wrap { position: relative; }
-
-  .sheet-search-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .sheet-search-icon {
-    display: none;
-    color: var(--ui-icon);
-    margin: 0 4px 0 0;
-  }
-  #sidebar.mode-search .sheet-search-icon { display: inline-block; }
-
-  .search-input-box {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    height: 47px;
-    background: var(--basalt-950);
+  .chip {
+    height: 44px;
     border-radius: 16px;
-    padding: 0 4px 0 14px;
-    box-shadow: inset 0 0 0 1px transparent;
-    transition: box-shadow 0.2s;
-  }
-  .search-input-box:focus-within { box-shadow: inset 0 0 0 1px var(--apricot-dim); }
-
-  #search-input {
-    flex: 1;
-    min-width: 0;
-    background: transparent;
+    padding: 0 14px;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--float-bg);
     border: none;
-    outline: none;
     color: var(--ui-text);
-    caret-color: var(--sapphire);
-    font-family: 'Inter', sans-serif;
-    font-size: 17px; /* >=16px prevents iOS auto-zoom */
-    height: 100%;
-  }
-  #search-input::placeholder { color: var(--fog); }
-
-  .search-clear-btn {
-    background: transparent;
-    border: none;
-    color: var(--fog);
-    font-size: 22px;
+    font-size: 14px; font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
     cursor: pointer;
-    padding: 0 10px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 44px;
-    min-width: 36px;
-    touch-action: manipulation;
+    animation: fadeUp .35s var(--ease) both;
   }
-  .search-clear-btn.hidden { display: none; }
 
-  .sheet-side-btn {
-    width: 55px; height: 47px;
-    border: none;
-    border-radius: 16px;
-    background: var(--basalt-950);
-    color: var(--ui-icon);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    flex-shrink: 0;
-    touch-action: manipulation;
-  }
-  .sheet-side-btn:active { background: var(--basalt-800); }
-  #search-close-btn {
+  /* ================= Home ================= */
+  #search-bar-wrap { display: none; position: relative; }
+  #sidebar.mode-search #search-bar-wrap { display: block; }
+
+  #where-btn {
     display: none;
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    background: #6b6e7c;
-    color: var(--basalt-950);
-    margin: 0 0 0 2px;
-  }
-  #sidebar.mode-search #sheet-spots-btn { display: none; }
-  #sidebar.mode-search #search-close-btn { display: flex; }
-
-  /* Search-as-you-type results */
-  .search-dropdown { margin-top: 8px; }
-  .search-dropdown.hidden { display: none; }
-  #sidebar:not(.mode-search) #search-dropdown { display: none; }
-
-  .search-item {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 14px;
-    padding: 10px 0;
-    min-height: 62px;
-    border-bottom: 1px solid rgba(58,61,74,.55);
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .search-item:last-child { border-bottom: none; }
-  .search-item:active { background: rgba(255,255,255,.03); }
-  .search-item-ico {
-    width: 40px; height: 40px;
-    border-radius: 12px;
-    flex-shrink: 0;
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-  }
-  .search-item-text { flex: 1; min-width: 0; }
-  .search-item-title {
-    font-size: 16.5px;
-    font-weight: 500;
-    color: var(--ui-text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .search-item-sub {
-    font-size: 13px;
-    color: var(--fog);
-    margin-top: 2px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .search-item-dist { font-size: 13px; color: var(--fog); flex-shrink: 0; }
-  .search-no-results {
-    padding: 22px 8px;
-    font-size: 14px;
-    color: var(--fog);
-    text-align: center;
-  }
-
-  /* ---------------- Segmented control (Landmarks | Traffic) ---------------- */
-  .search-tabs {
-    display: none;
-    height: 47px;
-    margin: 14px 0 6px;
-    padding: 3px;
-    gap: 2px;
-    background: var(--basalt-950);
-    border-radius: 16px;
-  }
-  .seg {
-    flex: 1;
+    width: 100%; height: 56px;
     border: none;
-    background: transparent;
-    border-radius: 13px;
-    color: var(--ui-text);
-    opacity: .75;
-    font-size: 17px;
-    font-weight: 500;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  #sidebar[data-tab="landmarks"] .seg[data-tab="landmarks"],
-  #sidebar[data-tab="traffic"] .seg[data-tab="traffic"] {
+    border-radius: 20px;
     background: var(--basalt-800);
-    opacity: 1;
+    color: var(--ui-text);
+    align-items: center;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+    font-size: 19px; font-weight: 600;
+    position: relative;
+  }
+  #sidebar.mode-home #where-btn { display: flex; }
+  .where-car { width: 78px; height: 56px; flex-shrink: 0; margin-left: -6px; padding: 10px 0 8px 0; color: var(--apricot); }
+  .where-text { flex: 1; text-align: left; padding-left: 6px; }
+  .where-go {
+    position: relative;
+    width: 56px; height: 56px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ui-icon);
+  }
+  .where-go::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 1px; background: rgba(255,255,255,.12); }
+  .intro .where-go .ico { animation: nudgeRight 1.8s var(--ease) 1.2s 3; }
+  /* a gentle ring on first load so the one thing to do is obvious */
+  #where-btn::after {
+    content: ""; position: absolute; inset: 0; border-radius: 20px;
+    box-shadow: inset 0 0 0 0 rgba(245,165,54,.0);
+    pointer-events: none;
   }
 
-  /* ---------------- Panes: which block shows in which sheet mode ---------------- */
-  #traffic-pane, #dest-pane, .sheet-note, .home-divider, .tiles, #presets { display: none; }
+  .intro #where-btn::after { animation: ring 1.8s var(--ease) .8s 2; }
 
-  #sidebar.mode-home .home-divider { display: block; }
-  #sidebar.mode-home .tiles { display: grid; }
-  #sidebar.mode-home #presets { display: flex; }
-  #sidebar.mode-search .search-tabs { display: flex; }
-  #sidebar.mode-search[data-tab="landmarks"] #presets { display: flex; }
-  #sidebar.mode-search[data-tab="landmarks"] .sheet-note { display: block; }
-  #sidebar.mode-search[data-tab="traffic"] #traffic-pane { display: block; }
-  #sidebar.mode-dest #dest-pane { display: block; }
-
-  /* While live search results are on screen they replace the tab content */
-  #search-bar-wrap:has(#search-dropdown:not(.hidden)) ~ .search-tabs,
-  #search-bar-wrap:has(#search-dropdown:not(.hidden)) ~ #presets,
-  #search-bar-wrap:has(#search-dropdown:not(.hidden)) ~ .sheet-note,
-  #search-bar-wrap:has(#search-dropdown:not(.hidden)) ~ #traffic-pane { display: none !important; }
-
-  /* ---------------- Landmark presets: chips (home) / list (search) ---------------- */
-  #presets {
-    gap: 22px;
+  /* Shortcut cards (home) / list rows (search): one element, two layouts */
+  #presets { display: none; }
+  #sidebar.mode-home #presets {
+    display: flex; gap: 10px;
     overflow-x: auto;
-    margin: 0 -16px;
-    padding: 12px 16px;
+    margin: 10px -16px 0;
+    padding: 0 16px 2px;
+    scroll-snap-type: x proximity;
+    scroll-padding: 0 16px;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
   #presets::-webkit-scrollbar { display: none; }
 
-  .preset-btn {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: none;
-    border: none;
-    padding: 6px 0;
-    min-height: 44px;
-    color: var(--ui-text);
-    font-size: 17px;
-    font-weight: 500;
-    text-align: left;
-    white-space: nowrap;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .preset-btn::before {
-    content: "";
-    width: 24px; height: 24px;
-    flex-shrink: 0;
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-  }
-
-  #sidebar.mode-search #presets {
-    flex-direction: column;
-    gap: 0;
-    overflow: visible;
-    margin: 0;
-    padding: 4px 0;
-  }
-  #sidebar.mode-search .preset-btn {
-    width: 100%;
-    gap: 14px;
-    padding: 10px 0;
-    min-height: 62px;
-    font-size: 17px;
-    border-bottom: 1px solid rgba(58,61,74,.55);
-  }
-  #sidebar.mode-search .preset-btn:last-child { border-bottom: none; }
-  #sidebar.mode-search .preset-btn::before { width: 40px; height: 40px; }
-
-  .sheet-note {
-    font-size: 12.5px;
-    color: var(--fog);
-    line-height: 1.5;
-    padding: 6px 2px 0;
-  }
-
-  /* ---------------- Home: divider + service tiles ---------------- */
-  .home-divider {
-    height: 1px;
-    margin: 0 -16px;
-    background: rgba(58,61,74,.7);
-  }
-  .tiles {
-    grid-template-columns: repeat(4, 1fr);
-    padding: 14px 0 4px;
-  }
-  .tile {
-    background: none;
-    border: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding: 0 2px;
-    color: var(--ui-text);
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.2;
-    text-align: center;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  .tile::before {
-    content: "";
-    width: 48px; height: 48px;
-    border-radius: 16px;
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-  }
-  .tile:active::before { filter: brightness(1.25); }
-
-  /* ---------------- Destination card + recommendations ---------------- */
-  #destination-active {
-    display: none;
+  .place {
     position: relative;
-    padding: 16px 44px 2px 2px;
-    margin-bottom: 2px;
-  }
-  .dest-label { font-size: 13px; color: var(--fog); }
-  #destination-active .coord {
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 600;
-    color: var(--ui-text);
-    font-size: 19px;
-    line-height: 1.25;
-    margin-top: 2px;
-    word-break: break-word;
-  }
-  #clear-destination {
-    position: absolute;
-    top: 16px; right: 0;
-    width: 32px; height: 32px;
-    border-radius: 50%;
+    flex: 0 0 108px;
+    height: 112px;
     border: none;
-    background: var(--basalt-700);
+    border-radius: 20px;
+    background: var(--basalt-800);
     color: var(--ui-text);
-    font-size: 20px;
-    line-height: 1;
+    padding: 12px;
+    display: flex;
+    text-align: left;
     cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    touch-action: manipulation;
+    scroll-snap-align: start;
+    animation: riseIn .5s var(--ease) both;
+    animation-delay: calc(var(--i, 0) * 55ms + 60ms);
+    --lv: var(--fog);
+  }
+  .place[data-level="easy"]     { --lv: var(--leaf); }
+  .place[data-level="moderate"] { --lv: var(--apricot); }
+  .place[data-level="tough"]    { --lv: var(--alert); }
+  .place-text { display: block; min-width: 0; }
+  .place-name {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    font-size: 16px; font-weight: 600; line-height: 1.18;
+  }
+  .place-sub { display: block; margin-top: 3px; font-size: 12.5px; font-weight: 500; color: var(--lv); }
+  .place-car { position: absolute; left: 10px; bottom: 9px; width: 60px; height: 29px; color: var(--lv); }
+  .place-recent {
+    position: absolute; top: 11px; right: 10px;
+    --ico-size: 14px; color: var(--fog); opacity: .8;
+  }
+  .place::before { display: none; }
+  .places-label { display: none; }
+  /* until the live outlook arrives */
+  .place[data-level="loading"] .place-sub {
+    width: 62px; height: 11px; border-radius: 6px; margin-top: 7px; color: transparent;
+    background: linear-gradient(90deg, var(--basalt-700) 25%, #3d404c 50%, var(--basalt-700) 75%);
+    background-size: 200% 100%; animation: shimmer 1.3s linear infinite;
   }
 
-  .section-title {
-    font-size: 20px;
-    font-weight: 600;
+  /* Two status pills (Yandex Go's Delivery | Scooters row): live traffic + auto-parking */
+  .status-row { display: none; gap: 10px; margin-top: 10px; }
+  #sidebar.mode-home .status-row { display: flex; animation: riseIn .5s var(--ease) .35s both; }
+  .status-pill {
+    flex: 1; min-width: 0;
+    height: 52px;
+    border: none; border-radius: 18px;
+    background: var(--basalt-800);
     color: var(--ui-text);
-    margin: 14px 0 4px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .pill-text { min-width: 0; line-height: 1.15; }
+  .pill-text b { display: block; font-size: 15px; font-weight: 600; }
+  .pill-text small { display: block; font-size: 12px; color: var(--fog); margin-top: 1px; }
+  .auto-ico { width: 30px; height: 30px; border-radius: 10px; flex-shrink: 0; background-size: 100% 100%; }
+  #auto-park-toggle[aria-checked="true"] #auto-park-state { color: var(--leaf); }
+  #auto-park-toggle[aria-checked="false"] { opacity: .75; }
+  #auto-park-toggle[aria-checked="false"] .auto-ico { filter: grayscale(1); }
+
+  /* One-at-a-time nudge: location permission, then install */
+  #nudge-card {
+    display: none;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 20px;
+    background: var(--basalt-800);
+    align-items: center; gap: 12px;
+  }
+  #nudge-card.show { display: flex; animation: riseIn .45s var(--ease) both; }
+  #sidebar:not(.mode-home) #nudge-card { display: none; }
+  .nudge-ico { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; background-size: 100% 100%; }
+  .nudge-text { flex: 1; min-width: 0; }
+  .nudge-text b { display: block; font-size: 15px; font-weight: 600; }
+  .nudge-text span { display: block; font-size: 12.5px; color: var(--fog); margin-top: 2px; line-height: 1.35; }
+  .nudge-actions { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+  #nudge-cta {
+    border: none; border-radius: 12px; padding: 10px 14px;
+    background: var(--apricot); color: var(--basalt-950);
+    font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  #nudge-dismiss {
+    border: none; background: none; color: var(--fog);
+    font-size: 12px; padding: 4px; cursor: pointer;
+  }
+
+  /* ================= Search ================= */
+  .sheet-search-row { display: flex; align-items: center; gap: 8px; }
+  #search-close-btn {
+    width: 40px; height: 44px; flex-shrink: 0;
+    border: none; background: none; color: var(--ui-icon);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; margin-left: -8px;
+  }
+  #search-close-btn .ico { transform: rotate(180deg); }
+  .search-input-box {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center;
+    height: 48px;
+    background: var(--basalt-950);
+    border-radius: 16px;
+    padding: 0 4px 0 14px;
+    box-shadow: inset 0 0 0 1px transparent;
+    transition: box-shadow .2s;
+  }
+  .search-input-box:focus-within { box-shadow: inset 0 0 0 1px var(--apricot-dim); }
+  #search-input {
+    flex: 1; min-width: 0; height: 100%;
+    background: transparent; border: none; outline: none;
+    color: var(--ui-text);
+    caret-color: var(--apricot);
+    font-family: 'Inter', sans-serif;
+    font-size: 17px; /* >=16px prevents iOS auto-zoom */
+  }
+  #search-input::placeholder { color: var(--fog); }
+  .search-clear-btn {
+    background: transparent; border: none; color: var(--fog);
+    font-size: 22px; cursor: pointer; padding: 0 10px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 40px;
+  }
+
+  .search-dropdown { margin-top: 6px; }
+  #sidebar:not(.mode-search) #search-dropdown { display: none; }
+  .search-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 0; min-height: 62px;
+    border-bottom: 1px solid rgba(58,61,74,.55);
+    cursor: pointer;
+    animation: fadeUp .28s var(--ease) both;
+  }
+  .search-item:last-child { border-bottom: none; }
+  .search-item:active { background: rgba(255,255,255,.03); }
+  .search-item-ico { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; background-size: 100% 100%; }
+  .search-item-text { flex: 1; min-width: 0; }
+  .search-item-title { font-size: 16.5px; font-weight: 500; color: var(--ui-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-item-sub { font-size: 13px; color: var(--fog); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-item-dist { font-size: 13px; color: var(--fog); flex-shrink: 0; }
+  .search-no-results { padding: 26px 8px; font-size: 14px; color: var(--fog); text-align: center; }
+
+  /* Landmarks / recents as a list while searching */
+  #sidebar.mode-search #presets { display: block; margin-top: 4px; }
+  #sidebar.mode-search .places-label {
+    display: block; margin: 14px 0 2px;
+    font-size: 13px; font-weight: 600; color: var(--fog);
+  }
+  #sidebar.mode-search .place {
+    display: flex; align-items: center; gap: 14px;
+    width: 100%; height: auto; min-height: 62px;
+    padding: 10px 0;
+    border-radius: 0; background: transparent;
+    border-bottom: 1px solid rgba(58,61,74,.55);
+    scroll-snap-align: none;
+  }
+  #sidebar.mode-search .place::before {
+    display: block; content: "";
+    width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+    background-size: 100% 100%;
+  }
+  #sidebar.mode-search .place-text { flex: 1; }
+  #sidebar.mode-search .place-name { display: block; font-size: 16.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sidebar.mode-search .place-car { position: static; width: 46px; height: 22px; flex-shrink: 0; }
+  #sidebar.mode-search .place-recent { display: none; }
+  .sheet-note { display: none; font-size: 12.5px; color: var(--fog); line-height: 1.5; padding: 10px 2px 0; }
+  #sidebar.mode-search .sheet-note { display: block; }
+
+  /* While live results are on screen they replace the shortcuts */
+  #search-bar-wrap:has(#search-dropdown:not(.hidden)) ~ #presets,
+  #search-bar-wrap:has(#search-dropdown:not(.hidden)) ~ .sheet-note { display: none !important; }
+
+  /* ================= Destination + recommendations ================= */
+  #dest-pane, #traffic-pane { display: none; }
+  #sidebar.mode-dest #dest-pane { display: block; animation: paneIn .38s var(--ease) both; }
+  #sidebar.mode-traffic #traffic-pane { display: block; animation: paneIn .38s var(--ease) both; }
+
+  #destination-active {
+    position: relative;
+    display: none;
+    align-items: center; gap: 12px;
+    padding: 4px 0 8px;
+  }
+  .dest-text { flex: 1; min-width: 0; cursor: pointer; }
+  .dest-title {
+    font-size: 21px; font-weight: 700; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dest-sub { font-size: 13px; color: var(--fog); margin-top: 2px; }
+  .round-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: none; flex-shrink: 0;
+    background: var(--basalt-700); color: var(--ui-text);
+    font-size: 20px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
   }
 
   .rec-card {
-    display: flex;
-    gap: 12px;
-    padding: 12px 0;
-    border-bottom: 1px solid rgba(58,61,74,.55);
-    align-items: center;
-    cursor: pointer;
-  }
-  .rec-card:last-child { border-bottom: none; }
-  .rec-rank {
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 700;
-    font-size: 17px;
-    color: var(--ui-text);
-    background: rgba(245,165,54,.15);
-    width: 40px; height: 40px;
-    border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-  }
-  .gauge {
-    width: 44px; height: 44px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
     position: relative;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(58,61,74,.55);
+    cursor: pointer;
+    animation: riseIn .45s var(--ease) both;
   }
-  .gauge-inner {
-    width: 33px; height: 33px;
-    border-radius: 50%;
-    background: var(--basalt-900);
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 10.5px;
-    font-weight: 700;
-    color: var(--ui-text);
-  }
-  .rec-body { flex: 1; min-width: 0; }
-  .rec-name {
-    font-size: 16.5px;
-    font-weight: 500;
-    color: var(--ui-text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .rec-meta {
-    font-size: 13px;
-    color: var(--fog);
-    margin-top: 3px;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .pill {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
+  .rec-card:nth-child(2) { animation-delay: .06s; }
+  .rec-card:nth-child(3) { animation-delay: .12s; }
+  .rec-card:last-child { border-bottom: none; }
+  .rec-card:active { background: rgba(255,255,255,.03); }
+  /* the first result is the answer: make it look like one */
+  .rec-card:first-child {
+    margin: 12px 0 4px;
+    padding: 14px 12px;
+    border: 1px solid var(--apricot-dim);
     border-radius: 20px;
+    background: rgba(245,165,54,.07);
   }
+  .rec-card:first-child::before {
+    content: "Best match";
+    position: absolute; top: -9px; left: 14px;
+    background: var(--apricot); color: var(--basalt-950);
+    font-size: 11px; font-weight: 700; letter-spacing: .02em;
+    padding: 2px 9px; border-radius: 8px;
+  }
+  .rec-rank {
+    font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 17px;
+    color: var(--ui-text); background: rgba(245,165,54,.15);
+    width: 40px; height: 40px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .rec-card:first-child .rec-rank { background: var(--apricot); color: var(--basalt-950); }
+  .rec-body { flex: 1; min-width: 0; }
+  .rec-name { font-size: 16.5px; font-weight: 600; color: var(--ui-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rec-meta { font-size: 13px; color: var(--fog); margin-top: 3px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .gauge { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .gauge-inner {
+    width: 33px; height: 33px; border-radius: 50%; background: var(--basalt-900);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Space Grotesk', sans-serif; font-size: 10.5px; font-weight: 700; color: var(--ui-text);
+  }
+  .rec-card:first-child .gauge-inner { background: #231f1a; }
+  .pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
   .pill-free   { background: rgba(52,199,123,.15); color: var(--leaf); }
   .pill-paid   { background: rgba(226,87,76,.15); color: var(--alert); }
   .pill-lot    { background: rgba(77,143,240,.15); color: var(--sapphire); }
   .pill-unavailable { background: rgba(243,156,18,.15); color: var(--unavailable); }
   .pill-unspecified { background: rgba(148,152,166,.15); color: var(--fog); }
+  #rec-empty { font-size: 14px; color: var(--fog); text-align: center; padding: 24px 8px; line-height: 1.6; }
 
-  #rec-empty {
-    font-size: 14px;
-    color: var(--fog);
-    text-align: center;
-    padding: 22px 8px;
-    line-height: 1.6;
+  /* loading placeholders while recommendations are on their way */
+  .rec-skel { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+  .rec-skel i, .rec-skel b, .rec-skel u {
+    display: block; border-radius: 10px; text-decoration: none;
+    background: linear-gradient(90deg, var(--basalt-800) 25%, #30333f 50%, var(--basalt-800) 75%);
+    background-size: 200% 100%; animation: shimmer 1.3s linear infinite;
   }
+  .rec-skel i { width: 40px; height: 40px; }
+  .rec-skel b { flex: 1; height: 38px; }
+  .rec-skel u { width: 44px; height: 44px; border-radius: 50%; }
 
-  /* ---------------- Traffic pane ---------------- */
+  /* ================= Traffic ================= */
+  .pane-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 6px; }
+  .pane-head .dest-title { font-size: 21px; }
+  .overall-level { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 700; margin-right: 4px; }
   .traffic-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 0;
-    border-bottom: 1px solid rgba(58,61,74,.55);
-    font-size: 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 0; border-bottom: 1px solid rgba(58,61,74,.55); font-size: 16px;
+    animation: fadeUp .3s var(--ease) both;
   }
   .traffic-card:last-child { border-bottom: none; }
   .traffic-name { color: var(--ui-text); font-weight: 500; }
-  .traffic-badge {
-    font-size: 12px;
-    font-weight: 700;
-    padding: 4px 10px;
-    border-radius: 20px;
-  }
+  .traffic-badge { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
   .badge-Low    { background: rgba(52,199,123,.15); color: var(--leaf); }
   .badge-Medium { background: rgba(245,165,54,.15); color: var(--apricot); }
   .badge-Heavy  { background: rgba(226,87,76,.15); color: var(--alert); }
-
-  .overall-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: 14px 0 6px;
-  }
-  .overall-banner .section-title { margin: 0 0 2px; }
-  .overall-banner .big {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 24px;
-    font-weight: 700;
-  }
   .muted { font-size: 12.5px; color: var(--fog); }
 
-  /* Circular live-traffic score (0-10), same idea as Yandex's traffic badge */
+  /* Circular 0-10 live-traffic score */
   .traffic-score {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px; height: 30px;
-    border-radius: 50%;
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--basalt-950);
-    background: var(--leaf);
-    box-shadow: 0 0 0 3px rgba(148,152,166,.22);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 700;
+    color: var(--basalt-950); background: var(--leaf);
+    box-shadow: 0 0 0 3px rgba(148,152,166,.2);
+    transition: background-color .4s;
   }
   .traffic-score.lvl-Medium { background: var(--apricot); }
   .traffic-score.lvl-Heavy  { background: var(--alert); color: var(--paper); }
 
-  /* ---------------- Map ---------------- */
+  /* ================= Map + overlays ================= */
   #map-wrap { position: absolute; inset: 0; }
   #map {
-    position: relative;
-    z-index: 0; /* contains Leaflet's internal z-indexes so the sheet and buttons always sit above */
-    height: 100%;
-    width: 100%;
-    background: #1b2030;
+    position: relative; z-index: 0; /* contains Leaflet's z-indexes so overlays always sit above */
+    height: 100%; width: 100%; background: #1b2030;
   }
-
   /* Dark navy map: OSM raster tiles inverted + tinted */
-  .leaflet-tile-pane {
-    filter: invert(1) hue-rotate(195deg) brightness(1.02) contrast(.82) saturate(.7);
-  }
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(195deg) brightness(1.02) contrast(.82) saturate(.7); }
 
-  /* ---------------- Floating map buttons ---------------- */
   .fab {
-    position: absolute;
-    z-index: 750;
-    width: 48px; height: 48px;
-    border-radius: 16px;
-    border: none;
-    background: var(--float-bg);
-    color: var(--ui-icon);
+    position: absolute; z-index: 750;
+    width: 46px; height: 46px; border-radius: 50%;
+    border: none; padding: 0;
+    background: var(--float-bg); color: var(--ui-icon);
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0,0,0,.35);
-    touch-action: manipulation;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    overflow: hidden;
   }
-  .fab:active { background: var(--basalt-800); }
-  #menu-btn    { top: calc(var(--safe-top) + 8px);  left:  calc(12px + var(--safe-left)); }
-  #layers-btn  { top: calc(var(--safe-top) + 8px);  right: calc(12px + var(--safe-right)); }
-  #traffic-btn { top: calc(var(--safe-top) + 68px); right: calc(12px + var(--safe-right)); }
+  #menu-btn   { top: calc(var(--safe-top) + 8px); left: calc(14px + var(--safe-left)); }
+  #menu-btn img { width: 100%; height: 100%; display: block; }
+  #layers-btn { top: calc(var(--safe-top) + 8px); right: calc(14px + var(--safe-right)); }
 
-  /* Title + clock/weather line, top centre (Yandex "Navigator" title) */
-  #top-title {
-    position: absolute;
-    z-index: 700;
-    top: calc(var(--safe-top) + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    max-width: calc(100% - 150px);
-    text-align: center;
-    pointer-events: none;
-    color: var(--ui-text);
-    text-shadow: 0 1px 6px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.9);
+  /* "Your location >  Street" (Yandex Go's address header) */
+  #loc-chip {
+    position: absolute; z-index: 700;
+    top: calc(var(--safe-top) + 6px); left: 50%; transform: translateX(-50%);
+    max-width: calc(100% - 140px);
+    border: none; background: none; cursor: pointer;
+    text-align: center; color: var(--ui-text);
+    text-shadow: 0 1px 6px rgba(0,0,0,.95), 0 0 2px rgba(0,0,0,.9);
+    padding: 2px 8px;
   }
-  #top-title .t { font-size: 22px; font-weight: 700; line-height: 28px; letter-spacing: .01em; }
-  #top-title .s {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    font-size: 12px; font-weight: 500; line-height: 16px; white-space: nowrap;
+  .loc-label { display: block; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+  #loc-street {
+    display: block; margin-top: 1px;
+    font-size: 19px; font-weight: 700; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: opacity .25s;
   }
-  .live-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--leaf);
-    box-shadow: 0 0 0 0 rgba(52,199,123,.6);
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(52,199,123,.55); }
-    70%  { box-shadow: 0 0 0 6px rgba(52,199,123,0); }
-    100% { box-shadow: 0 0 0 0 rgba(52,199,123,0); }
-  }
+  #loc-street.swap { opacity: 0; }
 
-  /* Zoom buttons: two separate rounded squares on the right edge */
+  /* Zoom buttons only where there is no pinch-zoom */
   .leaflet-control-container .leaflet-bottom.leaflet-right {
-    bottom: auto;
-    top: 40%;
-    right: calc(12px + var(--safe-right));
-    transition: top .25s;
-  }
-  body:not([data-sheet="home"]) .leaflet-control-container .leaflet-bottom.leaflet-right {
-    top: calc(var(--safe-top) + 132px);
+    bottom: auto; top: 40%;
+    right: calc(14px + var(--safe-right));
   }
   .leaflet-control-container .leaflet-bottom.leaflet-right .leaflet-control { margin: 0; }
   .leaflet-control-zoom {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    border: none !important;
-    box-shadow: none !important;
-    background: none !important;
+    display: flex; flex-direction: column; gap: 10px;
+    border: none !important; box-shadow: none !important; background: none !important;
   }
   .leaflet-control-container .leaflet-control-zoom a {
-    width: 48px !important; height: 48px !important;
-    line-height: 44px !important;
-    border-radius: 16px !important;
-    border: none !important;
-    background: var(--float-bg);
-    color: var(--ui-icon);
-    font-family: 'Inter', sans-serif;
-    font-size: 30px;
-    font-weight: 300;
-    box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    width: 44px !important; height: 44px !important; line-height: 40px !important;
+    border-radius: 14px !important; border: none !important;
+    background: var(--float-bg); color: var(--ui-icon);
+    font-family: 'Inter', sans-serif; font-size: 28px; font-weight: 300;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
   }
   .leaflet-control-container .leaflet-control-zoom a:hover { background: var(--basalt-800); color: var(--ui-icon); }
+  @media (pointer: coarse) { .leaflet-control-zoom { display: none; } }
 
-  /* OpenStreetMap attribution must stay visible, so it moves out from under the sheet */
+  /* OpenStreetMap attribution must stay visible, so it sits under the logo button */
   .leaflet-control-container .leaflet-bottom.leaflet-left {
-    bottom: auto;
-    top: calc(var(--safe-top) + 60px);
-    left: calc(8px + var(--safe-left));
+    bottom: auto; top: calc(var(--safe-top) + 58px); left: calc(8px + var(--safe-left));
   }
   .leaflet-control-attribution {
-    background: rgba(20,21,26,.72) !important;
-    color: var(--fog) !important;
-    font-size: 10px;
-    border-radius: 8px;
-    padding: 1px 7px !important;
+    background: rgba(20,21,26,.72) !important; color: var(--fog) !important;
+    font-size: 10px; border-radius: 8px; padding: 1px 7px !important;
   }
   .leaflet-control-attribution a { color: var(--fog) !important; }
 
-  /* Curation (Geoman) toolbar sits on the left, clear of the right-hand buttons */
+  /* Curation (Geoman) toolbar on the left, clear of the right-hand buttons */
   .leaflet-control-container .leaflet-top { top: calc(var(--safe-top) + 96px); }
   .leaflet-control-container .leaflet-left { left: var(--safe-left); }
-
   .leaflet-popup-content-wrapper { border-radius: 16px; }
 
+  /* One-time coachmark instead of a permanent banner */
   #hint-banner {
-    position: absolute;
-    top: calc(82px + var(--safe-top));
-    left: 50%; transform: translateX(-50%);
-    z-index: 500;
-    background: var(--float-bg);
-    border-radius: 999px;
-    padding: 7px 14px;
-    font-size: 11.5px;
-    color: var(--ui-text);
+    position: absolute; z-index: 500;
+    top: calc(var(--safe-top) + 74px); left: 50%;
+    transform: translate(-50%, -8px);
+    background: var(--float-bg); color: var(--ui-text);
+    border-radius: 999px; padding: 8px 14px;
+    font-size: 12.5px; font-weight: 500;
     display: flex; align-items: center; gap: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,.35);
-    transition: opacity .2s;
-    pointer-events: none;
-    max-width: calc(100% - 150px);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    opacity: 0; pointer-events: none;
+    transition: opacity .35s, transform .35s var(--ease);
+    max-width: calc(100% - 150px); white-space: nowrap;
   }
+  #hint-banner.show { opacity: 1; transform: translate(-50%, 0); }
   #hint-banner .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--apricot); flex-shrink: 0; }
 
-  .rec-marker {
-    background: var(--apricot);
-    color: var(--basalt-950);
-    font-family: 'Space Grotesk', sans-serif;
-    font-weight: 700;
-    font-size: 13px;
-    width: 26px; height: 26px;
-    border-radius: 50% 50% 50% 0;
-    transform: rotate(-45deg);
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 3px 10px rgba(0,0,0,.4);
-    border: 2px solid var(--basalt-950);
+  /* Destination callout (Yandex Go's "Pickup ~3 min" card) */
+  .dest-callout-wrap { width: 0; height: 0; }
+  .dest-callout {
+    position: absolute; bottom: 22px; left: 0; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 14px 7px 7px;
+    background: var(--basalt-900); color: var(--ui-text);
+    border-radius: 16px; white-space: nowrap;
+    box-shadow: 0 6px 20px rgba(0,0,0,.5);
+    animation: dropIn .5s var(--ease) both;
   }
+  .dc-ico { width: 34px; height: 34px; border-radius: 11px; flex-shrink: 0; background-size: 100% 100%; }
+  .dc-text b { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-size: 14px; font-weight: 700; line-height: 1.15; }
+  .dc-text span { display: block; font-size: 12px; color: var(--fog); margin-top: 1px; }
+  .dc-stem { position: absolute; left: -1px; bottom: 6px; width: 2px; height: 16px; background: var(--paper); border-radius: 1px; }
+  .dc-dot {
+    position: absolute; left: -7px; bottom: -1px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--sapphire); border: 3px solid var(--paper); box-shadow: 0 0 0 4px rgba(77,143,240,.25);
+  }
+
+  .rec-marker {
+    background: var(--apricot); color: var(--basalt-950);
+    font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px;
+    width: 26px; height: 26px;
+    border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 10px rgba(0,0,0,.4); border: 2px solid var(--basalt-950);
+    animation: popIn .45s var(--ease) both;
+  }
+  .rec-marker-wrap:nth-child(2) .rec-marker { animation-delay: .08s; }
   .rec-marker span { transform: rotate(45deg); }
 
-  .dest-marker {
-    width: 18px; height: 18px;
-    background: var(--sapphire);
-    border: 3px solid var(--paper);
-    border-radius: 50%;
-    box-shadow: 0 0 0 4px rgba(77,143,240,.25);
-  }
-
-  /* Live GPS user-location marker (distinct from the destination pin) */
+  /* Live GPS user-location marker */
   .user-marker-wrap { position: relative; }
   .user-location-marker {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 16px; height: 16px;
-    background: var(--leaf);
-    border: 3px solid var(--paper);
-    border-radius: 50%;
-    box-shadow: 0 0 0 4px rgba(52,199,123,.25);
-    z-index: 2;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 16px; height: 16px; background: var(--leaf);
+    border: 3px solid var(--paper); border-radius: 50%;
+    box-shadow: 0 0 0 4px rgba(52,199,123,.25); z-index: 2;
   }
   .user-location-pulse {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 16px; height: 16px;
-    background: rgba(52,199,123,.45);
-    border-radius: 50%;
-    animation: user-pulse 2.2s infinite;
-    z-index: 1;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 16px; height: 16px; background: rgba(52,199,123,.45); border-radius: 50%;
+    animation: user-pulse 2.2s infinite; z-index: 1;
   }
-  @keyframes user-pulse {
-    0%   { transform: translate(-50%, -50%) scale(1); opacity: .8; }
-    100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; }
-  }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--leaf); animation: pulse 2s infinite; flex-shrink: 0; }
 
-  /* ---------------- Layers sheet (map legend) ---------------- */
-  #layers-scrim, #menu-scrim {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,.4);
-    z-index: 940;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .25s;
-  }
-  #layers-scrim.open, #menu-scrim.open { opacity: 1; pointer-events: auto; }
-
-  #layers-sheet {
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    z-index: 950;
-    max-height: 82dvh;
-    overflow-y: auto;
-    background: var(--basalt-900);
-    border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
-    padding-bottom: calc(var(--safe-bottom) + 12px);
-    box-shadow: 0 -6px 24px rgba(0,0,0,.45);
-    transform: translateY(105%);
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  #layers-sheet.open { transform: translateY(0); }
-  .layers-title {
-    padding: 4px 16px 8px;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--ui-text);
-  }
-  .layer-row {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 11px 16px;
-    font-size: 17px;
-    color: var(--ui-text);
-    width: 100%;
-    background: none;
-    border: none;
-    text-align: left;
-    cursor: default;
-  }
-  button.layer-row { cursor: pointer; }
-  .layer-ico {
-    width: 40px; height: 40px;
-    border-radius: 12px;
-    background: var(--basalt-950);
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    color: var(--ui-icon);
-  }
-  .layer-name { flex: 1; min-width: 0; }
-  .layer-value { font-size: 14px; color: var(--fog); }
-  .swatch { width: 22px; height: 6px; border-radius: 3px; flex-shrink: 0; }
-
-  /* ---------------- Side menu (hamburger) ---------------- */
-  #menu-drawer {
-    position: fixed;
-    top: 0; bottom: 0; left: 0;
-    width: min(86vw, 340px);
-    z-index: 960;
-    overflow-y: auto;
-    background: var(--basalt-900);
-    padding: calc(var(--safe-top) + 22px) 4px calc(var(--safe-bottom) + 16px);
-    box-shadow: 8px 0 32px rgba(0,0,0,.5);
-    transform: translateX(-105%);
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  #menu-drawer.open { transform: translateX(0); }
-  .brand { padding: 0 16px 16px; margin-bottom: 8px; border-bottom: 1px solid rgba(58,61,74,.7); }
-  .brand-eyebrow { font-size: 13px; color: var(--ui-text); font-weight: 600; margin-bottom: 6px; }
-  .brand h1 { font-size: 22px; margin: 0; font-weight: 700; line-height: 1.15; color: var(--ui-text); }
-  .brand p { margin: 8px 0 0; font-size: 13px; color: var(--fog); line-height: 1.5; }
-  .clock-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--fog); }
-  #menu-drawer .layer-row { cursor: pointer; }
-  #menu-drawer .layer-row:active { background: rgba(255,255,255,.04); }
-  .d-row::before {
-    content: "";
-    width: 40px; height: 40px;
-    flex-shrink: 0;
-    border-radius: 12px;
-    background-size: 100% 100%;
-    background-repeat: no-repeat;
-  }
-  #admin-toggle.active { background: rgba(245,165,54,.12); }
-
-  /* ---------------- Automatic parking detection UI ---------------- */
-  #trip-pill .live-dot { flex-shrink: 0; }
-
-  #parked-toast {
-    position: absolute;
-    z-index: 780;
-    top: calc(var(--safe-top) + 124px);
-    left: calc(12px + var(--safe-left));
-    right: calc(72px + var(--safe-right));
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  /* ================= Toasts ================= */
+  #parked-toast, #snack {
+    position: absolute; z-index: 780;
+    top: calc(var(--safe-top) + 70px);
+    left: calc(14px + var(--safe-left)); right: calc(14px + var(--safe-right));
+    display: flex; align-items: center; gap: 12px;
     padding: 10px 10px 10px 12px;
-    background: var(--float-bg);
-    border-radius: 18px;
-    box-shadow: 0 6px 24px rgba(0,0,0,.5);
-    opacity: 0;
-    transform: translateY(-10px);
+    background: var(--float-bg); border-radius: 18px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.55);
+    opacity: 0; transform: translateY(-12px) scale(.98);
     pointer-events: none;
-    transition: opacity .25s, transform .25s;
+    transition: opacity .3s, transform .4s var(--ease);
   }
-  #parked-toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  #parked-toast.show, #snack.show { opacity: 1; transform: none; pointer-events: auto; }
+  #snack { justify-content: center; font-size: 14px; font-weight: 500; padding: 14px; }
   .toast-ico { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; background-size: 100% 100%; }
   .toast-text { flex: 1; min-width: 0; }
   .toast-title { font-size: 15px; font-weight: 600; line-height: 1.25; color: var(--ui-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .toast-sub { font-size: 12px; color: var(--fog); margin-top: 2px; }
   #toast-undo {
-    border: none;
-    background: var(--basalt-700);
-    color: var(--ui-text);
-    border-radius: 12px;
-    padding: 10px 14px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    flex-shrink: 0;
-    touch-action: manipulation;
+    border: none; background: var(--basalt-700); color: var(--ui-text);
+    border-radius: 12px; padding: 10px 14px; font-size: 14px; font-weight: 600; cursor: pointer; flex-shrink: 0;
   }
 
-  /* On/off switch row in the side menu */
+  /* ================= Legend sheet + menu ================= */
+  #layers-scrim, #menu-scrim {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 940;
+    opacity: 0; pointer-events: none; transition: opacity .3s;
+  }
+  #layers-scrim.open, #menu-scrim.open { opacity: 1; pointer-events: auto; }
+
+  #layers-sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 950;
+    max-height: 82dvh; overflow-y: auto;
+    background: var(--basalt-900);
+    border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+    padding-bottom: calc(var(--safe-bottom) + 12px);
+    box-shadow: 0 -8px 32px rgba(0,0,0,.5);
+    transform: translateY(105%);
+    transition: transform .4s var(--ease);
+  }
+  #layers-sheet.open { transform: translateY(0); }
+  .layers-title { padding: 4px 18px 8px; font-size: 21px; font-weight: 700; color: var(--ui-text); }
+  .layer-row {
+    display: flex; align-items: center; gap: 16px;
+    padding: 11px 18px; width: 100%;
+    font-size: 17px; color: var(--ui-text);
+    background: none; border: none; text-align: left; cursor: default;
+  }
+  button.layer-row { cursor: pointer; }
+  .layer-ico {
+    width: 40px; height: 40px; border-radius: 12px; background: var(--basalt-950);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--ui-icon);
+  }
+  .layer-name { flex: 1; min-width: 0; }
+  .swatch { width: 22px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+  .seg-toggle { cursor: pointer; border-bottom: 1px solid rgba(58,61,74,.55); margin-bottom: 4px; padding-bottom: 14px; }
+  #legend .legend-row { transition: opacity .25s; }
+  #legend.dim .legend-row { opacity: .4; }
+
+  /* On / off switch */
   .switch {
-    margin-left: auto;
-    width: 46px; height: 28px;
-    border-radius: 14px;
-    background: var(--basalt-700);
-    position: relative;
-    flex-shrink: 0;
-    transition: background .2s;
+    margin-left: auto; width: 46px; height: 28px; border-radius: 14px;
+    background: var(--basalt-700); position: relative; flex-shrink: 0; transition: background .25s;
   }
   .switch::after {
-    content: "";
-    position: absolute;
-    top: 3px; left: 3px;
-    width: 22px; height: 22px;
-    border-radius: 50%;
-    background: var(--paper);
-    transition: transform .2s;
+    content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--paper); transition: transform .25s var(--ease);
   }
   [aria-checked="true"] > .switch { background: var(--apricot); }
   [aria-checked="true"] > .switch::after { transform: translateX(18px); }
-  .menu-caption { padding: 2px 16px 14px 72px; font-size: 12.5px; line-height: 1.5; color: var(--fog); }
 
-  /* ---------------- Modals ---------------- */
-  #modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.55);
-    z-index: 999; /* above the sheet + buttons, just below the modals at z-index 1000 */
-    -webkit-tap-highlight-color: transparent;
+  /* Small "P" badge on parking lots (Yandex-style); the lot colour is set inline */
+  .lot-badge {
+    width: 20px; height: 20px; border-radius: 7px;
+    color: #fff; font: 700 12px/20px 'Inter', sans-serif; text-align: center;
+    border: 1.5px solid rgba(20,21,26,.9);
+    box-shadow: 0 1px 5px rgba(0,0,0,.5);
+    animation: popIn .4s var(--ease) both;
   }
-  #modal-backdrop.hidden { display: none; }
+  .leaflet-container.zoom-low .lot-badge { display: none; }
 
-  #admin-modal, #admin-login-modal {
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 1000;
-    width: min(92vw, 360px);
-    max-height: 88dvh;
-    overflow-y: auto;
+  #menu-drawer {
+    position: fixed; top: 0; bottom: 0; left: 0;
+    width: min(86vw, 340px); z-index: 960; overflow-y: auto;
     background: var(--basalt-900);
-    padding: 22px 20px 20px;
-    border-radius: 24px;
-    box-shadow: 0 16px 48px rgba(0,0,0,0.75);
+    padding: calc(var(--safe-top) + 24px) 4px calc(var(--safe-bottom) + 16px);
+    box-shadow: 8px 0 32px rgba(0,0,0,.5);
+    transform: translateX(-105%);
+    transition: transform .4s var(--ease);
   }
-  #admin-modal.hidden, #admin-login-modal.hidden { display: none; }
-  #admin-modal h3, #admin-login-modal h3 {
-    margin: 0 0 14px;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--ui-text);
+  #menu-drawer.open { transform: translateX(0); }
+  .brand { padding: 0 18px 18px; margin-bottom: 8px; border-bottom: 1px solid rgba(58,61,74,.7); }
+  .brand-logo { width: 56px; height: 56px; border-radius: 16px; display: block; margin-bottom: 14px; }
+  .brand h1 { font-size: 24px; margin: 0; font-weight: 700; color: var(--ui-text); }
+  .brand p { margin: 6px 0 0; font-size: 14px; color: var(--fog); line-height: 1.5; }
+  .menu-copy { padding: 6px 18px 10px; }
+  .menu-copy h2 { font-size: 15px; font-weight: 600; margin: 8px 0 4px; color: var(--ui-text); }
+  .menu-copy p { margin: 0; font-size: 13px; color: var(--fog); line-height: 1.55; }
+  .d-row { cursor: pointer; }
+  .d-row::before { content: ""; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; background-size: 100% 100%; }
+  #admin-toggle.active { background: rgba(245,165,54,.12); }
+  .menu-foot { padding: 14px 18px 0; font-size: 12px; color: var(--fog); display: flex; align-items: center; gap: 8px; }
+
+  /* ================= Modals ================= */
+  #modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    z-index: 999; /* above the sheet + buttons, just below the modals at 1000 */
+    animation: fadeIn .25s both;
   }
-  .admin-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
+  #admin-modal, #admin-login-modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 1000; width: min(92vw, 360px); max-height: 88dvh; overflow-y: auto;
+    background: var(--basalt-900); padding: 22px 20px 20px; border-radius: 28px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.75);
+    animation: modalIn .35s var(--ease) both;
   }
+  #admin-modal h3, #admin-login-modal h3 { margin: 0 0 14px; font-size: 20px; font-weight: 600; color: var(--ui-text); }
+  .admin-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
   .admin-field label { font-size: 13px; font-weight: 500; color: var(--fog); }
   .admin-field input, .admin-field select {
-    background: var(--basalt-950);
-    border: 1px solid transparent;
-    color: var(--ui-text);
-    padding: 10px 12px;
-    border-radius: 14px;
-    font-family: 'Inter', sans-serif;
-    font-size: 16px;
-    min-height: 48px;
+    background: var(--basalt-950); border: 1px solid transparent; color: var(--ui-text);
+    padding: 10px 12px; border-radius: 14px; font-family: 'Inter', sans-serif; font-size: 16px; min-height: 48px;
   }
-  .admin-field input:focus, .admin-field select:focus {
-    outline: none;
-    border-color: var(--apricot-dim);
-  }
-  .admin-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-  }
-  .btn-save, .btn-delete, .btn-cancel {
-    flex: 1;
-    font-weight: 600;
-    padding: 10px;
-    border-radius: 14px;
-    cursor: pointer;
-    font-size: 14px;
-    min-height: 48px;
-    touch-action: manipulation;
-  }
-  .btn-save {
-    background: var(--apricot);
-    color: var(--basalt-950);
-    border: none;
-  }
-  .btn-delete {
-    background: rgba(226,87,76,.18);
-    color: var(--alert);
-    border: none;
-  }
-  .btn-cancel {
-    background: var(--basalt-800);
-    color: var(--fog);
-    border: none;
+  .admin-field input:focus, .admin-field select:focus { outline: none; border-color: var(--apricot-dim); }
+  .admin-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .btn-save, .btn-delete, .btn-cancel { flex: 1; font-weight: 600; padding: 10px; border-radius: 14px; cursor: pointer; font-size: 14px; min-height: 48px; border: none; }
+  .btn-save   { background: var(--apricot); color: var(--basalt-950); }
+  .btn-delete { background: rgba(226,87,76,.18); color: var(--alert); }
+  .btn-cancel { background: var(--basalt-800); color: var(--fog); }
+
+  /* ================= Motion ================= */
+  @keyframes riseIn   { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes fadeUp   { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes fadeIn   { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes paneIn   { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @keyframes modalIn  { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
+  @keyframes popIn    { from { scale: 0; opacity: 0; } 60% { scale: 1.15; } to { scale: 1; opacity: 1; } }
+  @keyframes dropIn   { from { opacity: 0; transform: translate(-50%, -14px) scale(.9); } to { opacity: 1; transform: translate(-50%, 0); } }
+  @keyframes shimmer  { to { background-position: -200% 0; } }
+  @keyframes spin     { to { transform: rotate(360deg); } }
+  @keyframes nudgeRight { 0%, 60%, 100% { transform: none; } 30% { transform: translateX(5px); } }
+  @keyframes ring     { 0% { box-shadow: inset 0 0 0 0 rgba(245,165,54,.0); } 40% { box-shadow: inset 0 0 0 2px rgba(245,165,54,.65); } 100% { box-shadow: inset 0 0 0 2px rgba(245,165,54,0); } }
+  @keyframes pulse    { 0% { box-shadow: 0 0 0 0 rgba(52,199,123,.55); } 70% { box-shadow: 0 0 0 6px rgba(52,199,123,0); } 100% { box-shadow: 0 0 0 0 rgba(52,199,123,0); } }
+  @keyframes user-pulse { 0% { transform: translate(-50%, -50%) scale(1); opacity: .8; } 100% { transform: translate(-50%, -50%) scale(3.2); opacity: 0; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
   }
 
-  /* ---------------- Wider screens: sheet becomes a left-docked panel ---------------- */
+  /* ================= Wider screens: the sheet becomes a left-docked panel ================= */
   @media (min-width: 769px) {
-    #sidebar {
-      right: auto;
-      left: 12px;
-      width: 420px;
-    }
-    /* on a wide screen the map is beside the panel, so it may use the full height */
+    #sidebar { right: auto; left: 14px; width: 420px; }
     #sidebar.mode-search { height: calc(100dvh - var(--safe-top) - 6px); }
-    #sidebar.mode-dest { max-height: 70dvh; }
-    #layers-sheet { left: 12px; right: auto; width: 420px; }
+    #sidebar.mode-dest, #sidebar.mode-traffic { max-height: 70dvh; }
+    #layers-sheet { left: 14px; right: auto; width: 420px; }
   }
-  .preset-btn::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7' fill='%234a4d5a'/%3E%3Cg transform='translate(3.996 3.996) scale(0.667)' fill='none' stroke='%23eef0f4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); border-radius: 7px; }
-  #sidebar.mode-search .preset-btn::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); border-radius: 12px; }
   .search-item-ico { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-landmark { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10 12 4l9 6M5 10v9M9.5 10v9M14.5 10v9M19 10v9M3 20h18'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-street { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5.5' cy='19.5' r='2.2'/%3E%3Ccircle cx='18.5' cy='6.5' r='2.2'/%3E%3Cpath d='M7.7 19.5H14a3.25 3.25 0 0 0 0-6.5H10a3.25 3.25 0 0 1 0-6.5h6.3'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-address { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
-  .tile.t-spots::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='8' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
-  .tile.t-traffic::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='8' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='7.5' y='2.5' width='9' height='19' rx='3.5'/%3E%3Ccircle cx='12' cy='8' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='12' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='16' r='1.2' fill='%2334c77b'/%3E%3C/g%3E%3C/svg%3E"); }
-  .tile.t-landmarks::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='8' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10 12 4l9 6M5 10v9M9.5 10v9M14.5 10v9M19 10v9M3 20h18'/%3E%3C/g%3E%3C/svg%3E"); }
-  .tile.t-legend::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='8' fill='%2336232a'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23d9808a' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='12' height='12' rx='3.5'/%3E%3Cpath d='M8.5 20.5h8a4 4 0 0 0 4-4v-8'/%3E%3C/g%3E%3C/svg%3E"); }
-  .d-traffic::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='7.5' y='2.5' width='9' height='19' rx='3.5'/%3E%3Ccircle cx='12' cy='8' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='12' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='16' r='1.2' fill='%2334c77b'/%3E%3C/g%3E%3C/svg%3E"); }
-  .d-legend::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2336232a'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23d9808a' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='12' height='12' rx='3.5'/%3E%3Cpath d='M8.5 20.5h8a4 4 0 0 0 4-4v-8'/%3E%3C/g%3E%3C/svg%3E"); }
-  .d-curation::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 20 .8-4L16.5 4.3a2.1 2.1 0 0 1 3 3L7.8 19.2z'/%3E%3Cpath d='m14.5 6.3 3 3'/%3E%3C/g%3E%3C/svg%3E"); }
-  .d-autopark::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
+  #sidebar.mode-search .place::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
+  .auto-ico { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(4.56 4.56) scale(0.62)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
+  .nudge-ico.n-location { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 19.5 20 12 16 4.5 20z'/%3E%3C/g%3E%3C/svg%3E"); }
+  .nudge-ico.n-install { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7.500 10.500 12 15l4.500-4.500M5 19.500h14'/%3E%3C/g%3E%3C/svg%3E"); }
+  .dc-ico { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(4.56 4.56) scale(0.62)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
   .toast-ico { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
+  .d-curation::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 20 .8-4L16.5 4.3a2.1 2.1 0 0 1 3 3L7.8 19.2z'/%3E%3Cpath d='m14.5 6.3 3 3'/%3E%3C/g%3E%3C/svg%3E"); }
 </style>
 
 </head>
 <body data-sheet="home">
 
+<!-- Shared vector artwork (one car, recoloured per use via currentColor) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="car" viewBox="0 0 64 30">
+    <path fill="currentColor" d="M3 23c0-5 2-7 6-8l6-1.5 6.5-7C22.800 5.500 24 5 25.500 5h14c3 0 5 1 6.800 3.300L51 14.500l7 1.800c3 .8 5 2.700 5 6.700v3.500H3z"/>
+    <path fill="#14151a" opacity=".78" d="M25.500 8H31v6H20zM34 8h6c1.200 0 2 .4 2.800 1.300L46.500 14H34z"/>
+    <circle cx="16" cy="25.500" r="5" fill="#14151a"/><circle cx="16" cy="25.500" r="2" fill="#9498a6"/>
+    <circle cx="48" cy="25.500" r="5" fill="#14151a"/><circle cx="48" cy="25.500" r="2" fill="#9498a6"/>
+  </symbol>
+</svg>
+
 <div id="app">
 
-  <!-- Bottom sheet (Yandex Maps style). Modes: home (peek) / search (full screen) / dest (results).
-       Switched by setSheetMode() in the script below. -->
-  <aside id="sidebar" class="mode-home" data-tab="landmarks">
+  <!-- ============ Bottom sheet. Modes: home / search / dest / traffic (setSheetMode in the script) ============ -->
+  <aside id="sidebar" class="mode-home">
 
-    <!-- Floating row riding on the sheet: Where to? / trip status / locate -->
     <div class="sheet-float">
-      <button type="button" id="where-btn" class="pill-btn has-ico" style="--icon:var(--i-route)" onclick="openSearch()">Where to?</button>
-      <!-- Shown only while a drive is being tracked, so automatic parking detection is never invisible -->
-      <button type="button" id="trip-pill" class="pill-btn hidden" onclick="openMenu()"><span class="live-dot"></span><span id="trip-pill-text">Tracking your drive</span></button>
-      <button type="button" id="locate-btn" aria-label="Show my location" onclick="locateMe()"><span class="ico" style="--icon:var(--i-locate)"></span></button>
+      <button type="button" id="locate-btn" class="press" aria-label="Show my location" onclick="locateMe()"><span class="ico" style="--icon:var(--i-locate)"></span></button>
+      <!-- Only visible while a drive is being tracked, so automatic parking detection is never invisible -->
+      <button type="button" id="trip-pill" class="chip hidden" onclick="openMenu()"><span class="live-dot"></span><span id="trip-pill-text">Tracking your drive</span></button>
     </div>
 
-    <div id="mobile-sheet-handle">
-      <div class="handle-bar"></div>
-    </div>
+    <div id="mobile-sheet-handle"><div class="handle-bar"></div></div>
 
     <div id="sidebar-scroll">
 
-      <!-- Search row -->
+      <!-- HOME: the one big action -->
+      <button type="button" id="where-btn" class="press" onclick="openSearch()">
+        <svg class="where-car" aria-hidden="true"><use href="#car"/></svg>
+        <span class="where-text">Where to?</span>
+        <span class="where-go"><span class="ico" style="--icon:var(--i-arrow)"></span></span>
+      </button>
+
+      <!-- SEARCH: input + live results -->
       <div id="search-bar-wrap">
         <div class="sheet-search-row">
-          <span class="ico sheet-search-icon" style="--icon:var(--i-search)"></span>
+          <button type="button" id="search-close-btn" aria-label="Back" onclick="closeSearchMode()"><span class="ico" style="--icon:var(--i-arrow)"></span></button>
           <div class="search-input-box">
-            <input type="text" id="search-input" placeholder="Search here" enterkeyhint="search" autocomplete="off" spellcheck="false" />
-            <button id="search-clear-btn" class="search-clear-btn hidden" onclick="clearSearchInput()">&times;</button>
+            <input type="text" id="search-input" placeholder="Where to?" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" />
+            <button id="search-clear-btn" class="search-clear-btn hidden" aria-label="Clear" onclick="clearSearchInput()">&times;</button>
           </div>
-          <button type="button" id="sheet-spots-btn" class="sheet-side-btn" aria-label="Top parking spots" onclick="openSpots()"><span class="ico" style="--icon:var(--i-parking)"></span></button>
-          <button type="button" id="search-close-btn" class="sheet-side-btn" aria-label="Close search" onclick="closeSearchMode()"><span class="ico" style="--icon:var(--i-close);--ico-size:14px"></span></button>
         </div>
         <div id="search-dropdown" class="search-dropdown hidden"></div>
       </div>
 
-      <!-- Search mode: segmented control -->
-      <div class="search-tabs">
-        <button type="button" class="seg" data-tab="landmarks" onclick="setSheetTab('landmarks')">Landmarks</button>
-        <button type="button" class="seg" data-tab="traffic" onclick="setSheetTab('traffic')">Traffic</button>
-      </div>
-
-      <!-- Landmark presets: chip row on home, list in search mode -->
+      <!-- Shortcut cards on home, list rows while searching (same element, styled per mode) -->
       <div id="presets"></div>
-      <div id="destination-hint" class="sheet-note">Search an address, tap anywhere on the map, or pick a landmark.</div>
+      <div id="destination-hint" class="sheet-note">Tip: tap anywhere on the map to drop a pin.</div>
 
-      <!-- Search mode, Traffic tab -->
-      <div id="traffic-pane">
-        <div class="overall-banner">
-          <div>
-            <div class="section-title">Live traffic &middot; Kentron</div>
-            <div class="muted">by street, updated every 15s</div>
-          </div>
-          <div class="big" id="overall-level" style="color:var(--ui-text)">—</div>
+      <!-- HOME: two live status pills + one nudge at a time -->
+      <div class="status-row">
+        <button type="button" id="traffic-pill" class="status-pill press" onclick="openTraffic()">
+          <span class="traffic-score lvl-Low">–</span>
+          <span class="pill-text"><b>Traffic</b><small class="traffic-level-text">Live</small></span>
+        </button>
+        <button type="button" id="auto-park-toggle" class="status-pill press" role="switch" aria-checked="true" onclick="toggleAutoPark()">
+          <span class="auto-ico"></span>
+          <span class="pill-text"><b>Auto-parking</b><small id="auto-park-state">On</small></span>
+        </button>
+      </div>
+      <div id="nudge-card">
+        <div class="nudge-ico" id="nudge-ico"></div>
+        <div class="nudge-text"><b id="nudge-title"></b><span id="nudge-body"></span></div>
+        <div class="nudge-actions">
+          <button type="button" id="nudge-cta" class="press" onclick="nudgeAccept()">Turn on</button>
+          <button type="button" id="nudge-dismiss" onclick="nudgeDismiss()">Not now</button>
         </div>
-        <div id="traffic-list"></div>
       </div>
 
-      <!-- Destination mode: selected destination + top 3 recommendations -->
+      <!-- DESTINATION: where, plus the three best spots -->
       <div id="dest-pane">
         <div id="destination-active">
-          <div class="dest-label">Destination</div>
-          <div class="coord" id="dest-coords">—</div>
-          <button type="button" id="clear-destination" aria-label="Clear destination" onclick="clearDestination()">&times;</button>
+          <div class="dest-text" onclick="openSearch()">
+            <div class="dest-title" id="dest-coords">—</div>
+            <div class="dest-sub" id="dest-sub">Finding the best spots…</div>
+          </div>
+          <button type="button" id="clear-destination" class="round-btn" aria-label="Clear destination" onclick="clearDestination()">&times;</button>
         </div>
-        <div class="section-title">Top 3 recommended spots</div>
         <div id="rec-list">
           <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
         </div>
       </div>
 
-      <!-- Home mode: service tiles (like Yandex's Navigator / Gas stations / Transport / Ride row) -->
-      <div class="home-divider"></div>
-      <div class="tiles">
-        <button type="button" class="tile t-spots" onclick="openSpots()">Top spots</button>
-        <button type="button" class="tile t-traffic" onclick="openTraffic()">Traffic</button>
-        <button type="button" class="tile t-landmarks" onclick="openLandmarks()">Landmarks</button>
-        <button type="button" class="tile t-legend" onclick="openLayers()">Legend</button>
+      <!-- TRAFFIC -->
+      <div id="traffic-pane">
+        <div class="pane-head">
+          <div>
+            <div class="dest-title">Live traffic</div>
+            <div class="muted">Kentron &middot; updated every 15s</div>
+          </div>
+          <div style="display:flex; align-items:center;">
+            <span class="overall-level" id="overall-level">—</span>
+            <button type="button" class="round-btn" aria-label="Close" onclick="closeSearchMode()">&times;</button>
+          </div>
+        </div>
+        <div id="traffic-list"></div>
       </div>
 
     </div>
@@ -1236,31 +977,17 @@
 
   <div id="map-wrap">
 
-    <!-- Top-left menu, top-right layers + live traffic score (Yandex style) -->
-    <button type="button" id="menu-btn" class="fab" aria-label="Menu" onclick="openMenu()"><span class="ico" style="--icon:var(--i-menu)"></span></button>
+    <button type="button" id="menu-btn" class="fab press" aria-label="Menu" onclick="openMenu()"><img src="/icon.svg" alt="parkaway" width="46" height="46" /></button>
 
-    <div id="top-title">
-      <div class="t display">parkaway</div>
-      <div class="s">
-        <span class="live-dot"></span>
-        <span id="clock">--:--:--</span>
-        <span>&middot;</span>
-        <svg style="width:13px; height:13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"></path></svg>
-        <span id="weather-display">--°C, --</span>
-      </div>
-    </div>
+    <button type="button" id="loc-chip" aria-label="Centre on my location" onclick="locateMe()">
+      <span class="loc-label"><span id="loc-label-text">Parking in</span> &middot; <span id="weather-display">--°C</span> &rsaquo;</span>
+      <span id="loc-street">Kentron, Yerevan</span>
+    </button>
 
-    <button type="button" id="layers-btn" class="fab" aria-label="Map legend" onclick="openLayers()"><span class="ico" style="--icon:var(--i-layers)"></span></button>
-    <button type="button" id="traffic-btn" class="fab" aria-label="Live traffic" onclick="openTraffic()"><span class="traffic-score lvl-Low">–</span></button>
+    <button type="button" id="layers-btn" class="fab press" aria-label="Map legend" onclick="openLayers()"><span class="ico" style="--icon:var(--i-layers)"></span></button>
 
     <div id="map"></div>
-    <div id="hint-banner"><span class="dot"></span><span id="hint-text">Tap the map or search a destination</span></div>
-
-    <!-- Full-screen backdrop shown behind any open modal. Without this,
-         buttons elsewhere on the page (like "Where to?") stay clickable
-         while a modal is open, letting someone stack up multiple concurrent
-         actions (e.g. multiple simultaneous GPS lookups) by tapping through. -->
-    <div id="modal-backdrop" class="hidden" onclick="handleBackdropClick()"></div>
+    <div id="hint-banner"><span class="dot"></span><span id="hint-text">Tap the map to drop a pin</span></div>
 
     <!-- Appears when parking was detected automatically; ignoring it is fine, Undo removes the entry -->
     <div id="parked-toast" role="status" aria-live="polite">
@@ -1269,8 +996,14 @@
         <div class="toast-title" id="toast-title">Parked</div>
         <div class="toast-sub">Saved automatically</div>
       </div>
-      <button type="button" id="toast-undo" onclick="undoAutoParked()">Undo</button>
+      <button type="button" id="toast-undo" class="press" onclick="undoAutoParked()">Undo</button>
     </div>
+    <div id="snack" role="status" aria-live="polite"></div>
+
+    <!-- Full-screen backdrop shown behind any open modal. Without this,
+         buttons elsewhere on the page stay clickable while a modal is open,
+         letting someone stack up multiple concurrent actions by tapping through. -->
+    <div id="modal-backdrop" class="hidden" onclick="handleBackdropClick()"></div>
 
     <!-- Admin Form Modal Overlay -->
     <div id="admin-modal" class="hidden">
@@ -1318,13 +1051,17 @@
     </div>
   </div>
 
-  <!-- Layers sheet: the map legend + live traffic score (opened from the top-right button) -->
+  <!-- Map legend: the only place the legend lives -->
   <div id="layers-scrim" onclick="closeLayers()"></div>
   <div id="layers-sheet" role="dialog" aria-label="Map legend">
-    <div id="layers-handle" onclick="closeLayers()" style="display:flex; justify-content:center; padding:8px 0; cursor:pointer;"><div class="handle-bar"></div></div>
+    <div onclick="closeLayers()" style="display:flex; justify-content:center; padding:9px 0 8px; cursor:pointer;"><div class="handle-bar"></div></div>
     <div class="layers-title">Map legend</div>
+    <button type="button" id="segments-toggle" class="layer-row seg-toggle press" role="switch" aria-checked="true" onclick="toggleSegments()">
+      <span class="layer-ico"><span class="ico" style="--icon:var(--i-layers)"></span></span>
+      <span class="layer-name">Show parking segments</span>
+      <span class="switch"></span>
+    </button>
     <div id="legend">
-      <div class="layer-row"><span class="layer-ico"><span class="traffic-score lvl-Low">–</span></span><span class="layer-name">Live traffic</span><span class="layer-value traffic-level-text">—</span></div>
       <div class="legend-row layer-row"><span class="layer-ico"><span class="swatch" style="background:#e74c3c"></span></span><span class="layer-name">Paid parking (red lines)</span></div>
       <div class="legend-row layer-row"><span class="layer-ico"><span class="swatch" style="background:#2ecc71"></span></span><span class="layer-name">Free curbside lanes</span></div>
       <div class="legend-row layer-row"><span class="layer-ico"><span class="swatch" style="background:#3498db"></span></span><span class="layer-name">Dedicated parking lots</span></div>
@@ -1333,23 +1070,20 @@
     </div>
   </div>
 
-  <!-- Side menu (hamburger): app info + shortcuts + admin entry -->
+  <!-- Menu: about, how auto-parking works, admin entry -->
   <div id="menu-scrim" onclick="closeMenu()"></div>
   <aside id="menu-drawer" aria-label="Menu">
     <div class="brand">
-      <div class="brand-eyebrow">Kentron &middot; Yerevan</div>
-      <h1 class="display">Smart Parking Recommender</h1>
-      <p>Live-simulated curb &amp; lot availability across central Yerevan, scored against real-time congestion.</p>
-      <div class="clock-row">
-        <span class="live-dot"></span>
-        <span id="data-source-tag">simulated feed</span>
-      </div>
+      <img class="brand-logo" src="/icon.svg" alt="" />
+      <h1 class="display">parkaway</h1>
+      <p>Live curb &amp; lot availability across central Yerevan, scored against real-time congestion.</p>
     </div>
-    <button type="button" class="layer-row d-row d-traffic" onclick="closeMenu(); openTraffic();">Live traffic</button>
-    <button type="button" class="layer-row d-row d-legend" onclick="closeMenu(); openLayers();">Map legend</button>
-    <button type="button" id="auto-park-toggle" class="layer-row d-row d-autopark" role="switch" aria-checked="true" onclick="toggleAutoPark()">Detect parking automatically<span class="switch"></span></button>
-    <div class="menu-caption">While the app is open, your location is used to notice when you park. Your route isn't saved, only the spot where you stopped.</div>
+    <div class="menu-copy">
+      <h2>How auto-parking works</h2>
+      <p>While the app is open and you're driving, your location is used to notice when you park. Your route isn't saved, only the spot where you stopped. Turn it off any time from the home screen.</p>
+    </div>
     <button id="admin-toggle" class="layer-row d-row d-curation" onclick="closeMenu(); toggleAdminMode();">Admin / Curation Mode</button>
+    <div class="menu-foot"><span class="live-dot"></span><span id="clock">--:--:--</span><span>&middot;</span><span id="data-source-tag">simulated feed</span></div>
   </aside>
 
 </div>
@@ -1466,10 +1200,9 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchWeather();
   fetchTraffic();
   initSearchInput();
-  initGeolocation();
   initGenericClickTracking();
-  setInterval(fetchTraffic, 15000);
-  setInterval(fetchWeather, 60000);
+  setInterval(() => { if (!document.hidden) fetchTraffic(); }, 15000);
+  setInterval(() => { if (!document.hidden) fetchWeather(); }, 60000);
 });
 
 // Broad, low-effort click tracking: reports every button press by its id
@@ -1524,7 +1257,7 @@ function initMap() {
 
   map.on('click', (e) => {
     if (isAdminMode) return;
-    setDestination(e.latlng.lat, e.latlng.lng, `Custom Pin (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`, 'map_click');
+    setDestination(e.latlng.lat, e.latlng.lng, 'Dropped pin', 'map_click');
   });
 }
 
@@ -1564,6 +1297,7 @@ function startWatchingLocation() {
 
 function updateUserLocation(pos) {
   recordFix(pos); // every GPS fix also feeds automatic parking detection
+  updateWhere(pos.coords.latitude, pos.coords.longitude); // "Your location" chip
   userLat = pos.coords.latitude;
   userLon = pos.coords.longitude;
 
@@ -1619,6 +1353,9 @@ function initSearchInput() {
       const firstItem = searchDropdown.querySelector('.search-item');
       if (firstItem) {
         firstItem.click();
+      } else if (searchInput.value.trim().length >= 2) {
+        clearTimeout(searchDebounceTimer);
+        fetchSearchResults(searchInput.value.trim());
       }
     } else if (e.key === 'Escape') {
       searchDropdown.classList.add('hidden');
@@ -1649,6 +1386,8 @@ async function fetchSearchResults(query) {
     if (userLat != null && userLon != null) searchUrl += `&lat=${userLat}&lon=${userLon}`;
     const resp = await fetch(searchUrl);
     const results = await resp.json();
+    // A slow response must not resurrect results for a query that is no longer in the box.
+    if (document.getElementById('search-input').value.trim() !== query) return;
     renderSearchDropdown(results);
   } catch (err) {
     console.error('Search error:', err);
@@ -1755,14 +1494,10 @@ function loadParkingData(retryCount) {
 
       latestParkingFeatures = features;
 
-      parkingLayer = L.geoJSON({ type: "FeatureCollection", features: features }, {
-        style: (feature) => ({
-          color: feature.properties.color || '#7f8c8d',
-          weight: feature.geometry.type.includes('Polygon') ? 2 : 5,
-          opacity: 0.85,
-          fillColor: feature.properties.color || '#7f8c8d',
-          fillOpacity: 0.35
-        }),
+      // This layer is now the invisible, wide "hit" layer that carries the popup + admin handlers;
+      // the slim visible drawing is built in assembleParkingLayer() (see parkingStyle()).
+      const parkingHit = L.geoJSON({ type: "FeatureCollection", features: features }, {
+        style: parkingHitStyle,
         onEachFeature: (feature, layer) => {
           const props = feature.properties;
           layer.bindPopup(`
@@ -1782,7 +1517,9 @@ function loadParkingData(retryCount) {
             });
           }
         }
-      }).addTo(map);
+      });
+      parkingLayer = assembleParkingLayer(features, parkingHit);
+      applyParkingVisibility();
     })
     .catch(err => {
       console.error("Error loading parking data:", err);
@@ -1802,37 +1539,22 @@ function loadParkingData(retryCount) {
     });
 }
 
-function renderPresets() {
-  const grid = document.getElementById('presets');
-  grid.innerHTML = '';
-  PRESETS.forEach(p => {
-    const btn = document.createElement('button');
-    btn.className = 'preset-btn';
-    btn.innerText = p.name;
-    btn.onclick = () => {
-      map.setView([p.lat, p.lon], 16);
-      setDestination(p.lat, p.lon, p.name, 'preset');
-    };
-    grid.appendChild(btn);
-  });
-}
-
 function setDestination(lat, lon, label, method) {
   currentDest = { lat, lon, label };
 
   if (destMarker) map.removeLayer(destMarker);
 
   const destIcon = L.divIcon({
-    className: 'dest-marker-wrap',
-    html: '<div class="dest-marker"></div>',
-    iconSize: [18, 18],
-    iconAnchor: [9, 9]
+    className: 'dest-callout-wrap',
+    html: destCalloutHtml(label),
+    iconSize: [0, 0],
+    iconAnchor: [0, 0]
   });
 
   destMarker = L.marker([lat, lon], { icon: destIcon }).addTo(map);
 
-  document.getElementById('destination-active').style.display = 'block';
-  document.getElementById('dest-coords').innerText = label.includes('(') ? label : `${label} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+  document.getElementById('destination-active').style.display = 'flex';
+  document.getElementById('dest-coords').innerText = label;
 
   const eventParams = { method: method || 'unknown', destination_label: label };
   if (method === 'search' && searchStartedAt !== null) {
@@ -1841,8 +1563,7 @@ function setDestination(lat, lon, label, method) {
   gaEvent('destination_selected', eventParams);
   searchStartedAt = null; // reset for the next search
 
-  setSheetMode('dest');
-  setTimeout(() => centerAboveSheet(lat, lon), 350);
+  onDestinationSet(lat, lon, label, method);
   fetchRecommendations(lat, lon);
 }
 
@@ -1856,7 +1577,7 @@ function clearDestination() {
   document.getElementById('rec-list').innerHTML = `
     <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
   `;
-  setSheetMode('home');
+  onDestinationCleared();
 }
 
 function fetchRecommendations(lat, lon) {
@@ -1868,6 +1589,7 @@ function fetchRecommendations(lat, lon) {
 }
 
 function renderRecommendations(recs) {
+  updateDestSummary(recs);
   recMarkers.forEach(m => map.removeLayer(m));
   recMarkers = [];
 
@@ -1888,7 +1610,7 @@ function renderRecommendations(recs) {
       iconAnchor: [13, 26]
     });
 
-    const m = L.marker([r.location.lat, r.location.lon], { icon: markerIcon }).addTo(map);
+    const m = L.marker([r.location.lat, r.location.lon], { icon: markerIcon, zIndexOffset: 500 }).addTo(map);
     m.bindPopup(`
       <div style="font-family:'Inter',sans-serif; color:#14151a;">
         <strong>#${rank} ${escapeHtml(r.name)}</strong><br/>
@@ -1940,6 +1662,7 @@ function fetchTraffic() {
     .then(data => {
       document.getElementById('overall-level').innerText = data.overall_level;
       updateTrafficBadge(data);
+      updateDataSourceTag(data);
       const container = document.getElementById('traffic-list');
       container.innerHTML = '';
       (data.streets || []).slice(0, 8).forEach(s => {
@@ -1982,9 +1705,9 @@ function collapseMobileSheet() {
   let sheetHeight = 0;
 
   function collapsedTranslate() {
-    // Matches the CSS: translateY(calc(100% - 80px - safe-bottom))
+    // Matches the CSS: translateY(calc(100% - 88px - safe-bottom))
     const safeBottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')) || 0;
-    return sheetHeight - 80 - safeBottom;
+    return sheetHeight - 88 - safeBottom;
   }
 
   function onPointerDown(e) {
@@ -2364,16 +2087,21 @@ function releaseWakeLock() {
   if (wakeLockSentinel) { wakeLockSentinel.release().catch(() => {}); wakeLockSentinel = null; }
 }
 
+function renderAutoParkState() {
+  document.getElementById('auto-park-toggle').setAttribute('aria-checked', String(autoParkEnabled));
+  document.getElementById('auto-park-state').textContent = autoParkEnabled ? 'On' : 'Off';
+}
+
 function toggleAutoPark() {
   autoParkEnabled = !autoParkEnabled;
   try { localStorage.setItem(AUTO_PARK_PREF_KEY, autoParkEnabled ? 'on' : 'off'); } catch (e) {}
-  document.getElementById('auto-park-toggle').setAttribute('aria-checked', String(autoParkEnabled));
+  renderAutoParkState();
   gaEvent('auto_parking_toggle', { enabled: autoParkEnabled ? 1 : 0 });
   if (!autoParkEnabled) { tripId = null; releaseWakeLock(); setTripPill(null); }
 }
 
 function initAutoParking() {
-  document.getElementById('auto-park-toggle').setAttribute('aria-checked', String(autoParkEnabled));
+  renderAutoParkState();
   if (navigator.getBattery) {
     navigator.getBattery().then(b => { batteryInfo = b; }).catch(() => {});
   }
@@ -2517,22 +2245,55 @@ function deleteAdminFeature() {
 }
 
 // --------------------------------------------------------------------------
-// Yandex-Maps-style UI controller: bottom-sheet modes, side menu, legend sheet
+// UI controller (Yandex Go-style): bottom-sheet modes, shortcut cards,
+// nudges, destination callout
 // --------------------------------------------------------------------------
-// The sheet (#sidebar) has three modes, driven by a class on the element:
-//   mode-home   - peek: search bar, landmark chips, service tiles
-//   mode-search - full screen: search + results, Landmarks / Traffic tabs
-//   mode-dest   - selected destination + the top 3 recommended spots
+// The sheet (#sidebar) has four modes, driven by a class on the element:
+//   mode-home    - "Where to?", shortcut cards, traffic + auto-parking pills
+//   mode-search  - input + live results, shortcuts as a list
+//   mode-dest    - the selected destination and its top 3 spots
+//   mode-traffic - live traffic by street
+const REDUCED_MOTION = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 let sheetMode = 'home';
 
-function setSheetMode(mode, tab) {
+function lsGet(key, fallback) {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; }
+}
+function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
+
+// ---- Sheet modes ----------------------------------------------------------
+// Back button / swipe-back: entering any non-home view pushes one history entry so
+// "back" returns to the previous view instead of leaving the app.
+let navPushed = false;
+let inPop = false;
+
+function syncHistory(mode) {
+  if (inPop) return;
+  try {
+    if (mode !== 'home' && !navPushed) { history.pushState({ pk: 1 }, ''); navPushed = true; }
+    else if (mode === 'home' && navPushed) { navPushed = false; history.back(); }
+  } catch (e) {}
+}
+
+window.addEventListener('popstate', () => {
+  if (!navPushed) return;
+  navPushed = false;
+  inPop = true;
+  try {
+    if (sheetMode === 'dest') clearDestination();
+    else if (sheetMode !== 'home') closeSearchMode();
+  } finally { inPop = false; }
+  if (sheetMode !== 'home') { try { history.pushState({ pk: 1 }, ''); navPushed = true; } catch (e) {} }
+});
+
+function setSheetMode(mode) {
   const sb = document.getElementById('sidebar');
+  const fromHeight = sb.offsetHeight;
   sheetMode = mode;
-  sb.classList.remove('mode-home', 'mode-search', 'mode-dest');
+  sb.classList.remove('mode-home', 'mode-search', 'mode-dest', 'mode-traffic');
   sb.classList.add('mode-' + mode);
   document.body.dataset.sheet = mode;
-  if (tab) sb.dataset.tab = tab;
-  // Any mode other than the peek view needs the sheet open.
+  // Any mode other than the home view needs the sheet open.
   if (mode !== 'home') sb.classList.remove('sheet-collapsed');
   if (mode !== 'search') {
     document.getElementById('search-dropdown').classList.add('hidden');
@@ -2540,41 +2301,29 @@ function setSheetMode(mode, tab) {
     if (document.activeElement === input) input.blur();
   }
   document.getElementById('sidebar-scroll').scrollTop = 0;
-}
+  syncHistory(mode);
 
-function setSheetTab(tab) {
-  document.getElementById('sidebar').dataset.tab = tab;
+  // Morph the sheet between heights instead of snapping.
+  const toHeight = sb.offsetHeight;
+  if (!REDUCED_MOTION && fromHeight && toHeight && Math.abs(fromHeight - toHeight) > 4 && sb.animate) {
+    sb.animate([{ height: fromHeight + 'px' }, { height: toHeight + 'px' }],
+               { duration: 320, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+  }
+  if (mode === 'home') maybeShowInstallNudge();
 }
 
 function openSearch() {
-  setSheetMode('search', 'landmarks');
+  setSheetMode('search');
   document.getElementById('search-input').focus();
 }
-
-function openLandmarks() { setSheetMode('search', 'landmarks'); }
 
 function openTraffic() {
   closeMenu();
   closeLayers();
-  setSheetMode('search', 'traffic');
+  setSheetMode('traffic');
 }
 
-// "Top spots" needs a destination; without one, start by choosing it.
-function openSpots() {
-  if (currentDest) setSheetMode('dest');
-  else openSearch();
-}
-
-// On phones the sheet covers the lower part of the map, so shift the view such
-// that the destination (and its recommended spots) sit in the visible area above it.
-function centerAboveSheet(lat, lon) {
-  if (window.innerWidth > 768 || !currentDest) return;
-  const sb = document.getElementById('sidebar');
-  const z = map.getZoom();
-  const shifted = map.unproject(map.project([lat, lon], z).add([0, sb.offsetHeight / 2]), z);
-  map.setView(shifted, z, { animate: true });
-}
-
+// Back arrow / close: return to the destination if one is set, else home.
 function closeSearchMode() {
   setSheetMode(currentDest ? 'dest' : 'home');
 }
@@ -2587,7 +2336,6 @@ function closeMenu() {
   document.getElementById('menu-drawer').classList.remove('open');
   document.getElementById('menu-scrim').classList.remove('open');
 }
-
 function openLayers() {
   closeMenu();
   document.getElementById('layers-sheet').classList.add('open');
@@ -2598,13 +2346,14 @@ function closeLayers() {
   document.getElementById('layers-scrim').classList.remove('open');
 }
 
-// Re-centre on the live GPS fix (asks for permission again if it was never granted).
-function locateMe() {
-  if (userLat != null && userLon != null) {
-    map.setView([userLat, userLon], 17);
-  } else {
-    initGeolocation();
-  }
+// On phones the sheet covers the lower part of the map, so shift the view such
+// that the destination (and its recommended spots) sit in the visible area above it.
+function centerAboveSheet(lat, lon, zoom) {
+  if (window.innerWidth > 768) { map.flyTo([lat, lon], zoom, { duration: 0.6 }); return; }
+  const z = zoom || map.getZoom();
+  const shift = Math.round(window.innerHeight * 0.19);
+  const target = map.unproject(map.project([lat, lon], z).add([0, shift]), z);
+  map.flyTo(target, z, { duration: 0.6 });
 }
 
 function formatDistance(m) {
@@ -2613,7 +2362,299 @@ function formatDistance(m) {
   return `${(m / 1000).toFixed(1)} km`;
 }
 
-// Circular 0-10 traffic score + level text (top-right button and legend sheet).
+function showSnack(text) {
+  const el = document.getElementById('snack');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(showSnack._t);
+  showSnack._t = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// ---- "Your location" chip ---------------------------------------------------
+let lastWhere = { lat: 0, lon: 0, ts: 0 };
+function updateWhere(lat, lon) {
+  const now = Date.now();
+  if (lastWhere.ts && haversineMeters(lat, lon, lastWhere.lat, lastWhere.lon) < 80 && now - lastWhere.ts < 120000) return;
+  lastWhere = { lat, lon, ts: now };
+  fetch(`/api/where?lat=${lat}&lon=${lon}`)
+    .then(r => r.json())
+    .then(d => {
+      const street = document.getElementById('loc-street');
+      document.getElementById('loc-label-text').textContent = 'Your location';
+      const next = d.street || (d.in_service_area ? 'Kentron, Yerevan' : 'Outside Yerevan');
+      if (street.textContent === next) return;
+      street.classList.add('swap');
+      setTimeout(() => { street.textContent = next; street.classList.remove('swap'); }, 180);
+    })
+    .catch(() => {});
+}
+
+function locateMe() {
+  const btn = document.getElementById('locate-btn');
+  if (userLat != null && userLon != null) {
+    map.flyTo([userLat, userLon], Math.max(map.getZoom(), 16), { duration: 0.7 });
+    return;
+  }
+  // No fix yet: ask now (this is the user's own tap, so the prompt makes sense).
+  btn.classList.add('busy');
+  setTimeout(() => btn.classList.remove('busy'), 4000);
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then(p => {
+      if (p.state === 'denied') showSnack('Location is blocked. Allow it in your browser settings.');
+      else initGeolocation();
+    }).catch(() => initGeolocation());
+  } else {
+    initGeolocation();
+  }
+}
+
+// ---- Shortcut cards: recents + popular places, with a live parking outlook ----
+const RECENTS_KEY = 'parkaway.recents';
+const OUTLOOK_TEXT = { easy: 'Easy parking', moderate: 'Getting busy', tough: 'Hard to park', unknown: 'See spots' };
+let placeOutlook = {};   // "lat,lon" -> outlook from /api/outlook
+
+const placeKey = p => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+
+function loadRecents() {
+  try {
+    const list = JSON.parse(lsGet(RECENTS_KEY, '[]'));
+    return list.filter(r => r && typeof r.name === 'string' && isFinite(r.lat) && isFinite(r.lon)).slice(0, 6);
+  } catch (e) { return []; }
+}
+
+function saveRecent(lat, lon, name) {
+  const keep = loadRecents().filter(r => r.name !== name && haversineMeters(r.lat, r.lon, lat, lon) > 60);
+  keep.unshift({ name, lat, lon });
+  lsSet(RECENTS_KEY, JSON.stringify(keep.slice(0, 6)));
+}
+
+function quickPlaces() {
+  // Recents first (that is what a returning user wants). A popular place that is also a
+  // recent moves to the front instead of appearing twice.
+  const recents = loadRecents().slice(0, 3).map(r => ({ ...r, recent: true }));
+  const rest = PRESETS.filter(p => !recents.some(r => haversineMeters(p.lat, p.lon, r.lat, r.lon) < 80));
+  return recents.concat(rest);
+}
+
+function placeButton(p, i) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'place press';
+  btn.dataset.key = placeKey(p);
+  btn.dataset.level = 'loading';
+  btn.style.setProperty('--i', i);
+  btn.innerHTML = `
+    <span class="place-text"><span class="place-name">${escapeHtml(p.name)}</span><span class="place-sub">&nbsp;</span></span>
+    ${p.recent ? '<span class="ico place-recent" style="--icon:var(--i-clock)"></span>' : ''}
+    <svg class="place-car" aria-hidden="true"><use href="#car"/></svg>`;
+  btn.onclick = () => {
+    gaEvent('shortcut_tap', { place: p.name, recent: p.recent ? 1 : 0, level: btn.dataset.level });
+    setDestination(p.lat, p.lon, p.name, 'preset');
+  };
+  return btn;
+}
+
+function renderPresets() {
+  const grid = document.getElementById('presets');
+  grid.innerHTML = '';
+  const places = quickPlaces();
+  let idx = 0, addedRecentLabel = false, addedPopularLabel = false;
+  places.forEach(p => {
+    // Section labels only show in the list layout (CSS hides them on the cards).
+    if (p.recent && !addedRecentLabel) { grid.insertAdjacentHTML('beforeend', '<div class="places-label">Recent</div>'); addedRecentLabel = true; }
+    if (!p.recent && !addedPopularLabel) { grid.insertAdjacentHTML('beforeend', '<div class="places-label">Popular places</div>'); addedPopularLabel = true; }
+    grid.appendChild(placeButton(p, idx++));
+  });
+  applyOutlook();
+  refreshOutlook();
+}
+
+function applyOutlook() {
+  document.querySelectorAll('#presets .place').forEach(btn => {
+    const o = placeOutlook[btn.dataset.key];
+    if (!o) return;
+    btn.dataset.level = o.level;
+    btn.querySelector('.place-sub').textContent = OUTLOOK_TEXT[o.level] || OUTLOOK_TEXT.unknown;
+  });
+}
+
+let outlookInFlight = false;
+function refreshOutlook() {
+  if (outlookInFlight || document.hidden) return;
+  const pts = quickPlaces().map(p => `${p.lat},${p.lon}`).join('|');
+  outlookInFlight = true;
+  fetch(`/api/outlook?pts=${encodeURIComponent(pts)}`)
+    .then(r => r.json())
+    .then(data => {
+      (data.places || []).forEach(o => { placeOutlook[`${o.lat.toFixed(4)},${o.lon.toFixed(4)}`] = o; });
+      applyOutlook();
+    })
+    .catch(() => {
+      // Never leave a card shimmering forever.
+      document.querySelectorAll('#presets .place[data-level="loading"]').forEach(b => {
+        b.dataset.level = 'unknown';
+        b.querySelector('.place-sub').textContent = OUTLOOK_TEXT.unknown;
+      });
+    })
+    .finally(() => { outlookInFlight = false; });
+}
+
+// ---- Destination: callout pin, skeletons, labels -------------------------------
+function shortLabel(label) {
+  return label.length > 22 ? label.slice(0, 21) + '…' : label;
+}
+
+// Yandex Go's "Pickup ~3 min" card, as a map pin.
+function destCalloutHtml(label) {
+  return `<div class="dest-callout"><div class="dc-ico"></div><div class="dc-text"><b>${escapeHtml(shortLabel(label))}</b><span id="dc-sub">Finding spots…</span></div></div><div class="dc-stem"></div><div class="dc-dot"></div>`;
+}
+
+function showRecSkeleton() {
+  recMarkers.forEach(m => map.removeLayer(m));
+  recMarkers = [];
+  const row = '<div class="rec-skel"><i></i><b></b><u></u></div>';
+  document.getElementById('rec-list').innerHTML = row + row + row;
+  document.getElementById('dest-sub').textContent = 'Finding the best spots…';
+}
+
+// Called from setDestination() once the destination is placed.
+function onDestinationSet(lat, lon, label, method) {
+  const input = document.getElementById('search-input');
+  if (method !== 'search') { input.value = ''; document.getElementById('search-clear-btn').classList.add('hidden'); }
+  if (method === 'search' || method === 'preset') saveRecent(lat, lon, label);
+  lsSet('parkaway.dests', String((parseInt(lsGet('parkaway.dests', '0'), 10) || 0) + 1));
+  document.getElementById('dest-coords').title = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+
+  showRecSkeleton();
+  setSheetMode('dest');
+  centerAboveSheet(lat, lon, method === 'map_click' ? map.getZoom() : 16);
+
+  // A dropped pin has no name: borrow the nearest street.
+  if (method === 'map_click') {
+    fetch(`/api/where?lat=${lat}&lon=${lon}`).then(r => r.json()).then(d => {
+      if (!currentDest || currentDest.lat !== lat || currentDest.lon !== lon || !d.street) return;
+      currentDest.label = `Near ${d.street}`;
+      document.getElementById('dest-coords').innerText = currentDest.label;
+      const b = document.querySelector('.dest-callout .dc-text b');
+      if (b) b.textContent = shortLabel(currentDest.label);
+    }).catch(() => {});
+  }
+}
+
+// Called from clearDestination().
+function onDestinationCleared() {
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-clear-btn').classList.add('hidden');
+  setSheetMode('home');
+  renderPresets();
+}
+
+// Called from renderRecommendations(): headline numbers for the header + the map callout.
+function updateDestSummary(recs) {
+  const sub = document.getElementById('dest-sub');
+  const dc = document.getElementById('dc-sub');
+  if (!recs || !recs.length) {
+    sub.textContent = 'No spots within range';
+    if (dc) dc.textContent = 'No spots nearby';
+    return;
+  }
+  const best = recs[0];
+  sub.textContent = `${recs.length} spot${recs.length > 1 ? 's' : ''} · best is ~${best.walk_time_min} min walk`;
+  if (dc) dc.textContent = `Best spot ~${best.walk_time_min} min walk`;
+}
+
+// ---- Parking segments: slim, zoom-aware, one visibility switch ---------------------
+// The segments used to be 5px bars drawn straight over the roads. They are now thin
+// (2-4.5px, growing with zoom) and semi-transparent so the street names and shapes stay
+// readable, in the same colours. Lots get a thin outline plus a small "P" badge instead of
+// a big filled block. Tapping is still easy: an invisible, much wider layer sits on top
+// and carries the popup / admin-edit handlers.
+const SEG_PREF_KEY = 'parkaway.segments';
+let parkingVisible = lsGet(SEG_PREF_KEY, 'on') !== 'off';
+let parkingVisual = null;
+
+function parkingWeight(z) {
+  return z <= 13 ? 1.6 : z <= 14 ? 2 : z <= 15 ? 2.5 : z <= 16 ? 3 : z <= 17 ? 3.5 : 4.5;
+}
+
+function parkingStyle(feature) {
+  const color = feature.properties.color || '#7f8c8d';
+  if (feature.geometry.type.includes('Polygon')) {
+    return { color, weight: 1.5, opacity: 0.75, fill: true, fillColor: color, fillOpacity: 0.1, lineJoin: 'round' };
+  }
+  return { color, weight: parkingWeight(map.getZoom()), opacity: 0.8, fill: false, lineCap: 'round', lineJoin: 'round' };
+}
+
+function parkingHitStyle(feature) {
+  return feature.geometry.type.includes('Polygon')
+    ? { weight: 8, opacity: 0, fill: true, fillOpacity: 0 }
+    : { weight: 18, opacity: 0, fill: false };
+}
+
+function restyleParking() {
+  if (!parkingVisual) return;
+  parkingVisual.setStyle(parkingStyle);
+  map.getContainer().classList.toggle('zoom-low', map.getZoom() < 15);
+}
+
+function assembleParkingLayer(features, hit) {
+  parkingVisual = L.geoJSON({ type: 'FeatureCollection', features: features }, { style: parkingStyle, interactive: false });
+  const badges = L.layerGroup();
+  hit.eachLayer(l => {
+    const f = l.feature;
+    if (!f || !f.geometry.type.includes('Polygon')) return;
+    const c = l.getBounds().getCenter();
+    const color = f.properties.color || '#3498db';
+    const m = L.marker(c, {
+      icon: L.divIcon({ className: 'lot-badge-wrap', html: `<div class="lot-badge" style="background:${color}">P</div>`, iconSize: [20, 20], iconAnchor: [10, 10] }),
+      zIndexOffset: 100, keyboard: false
+    });
+    // the badge opens the same popup / admin editor as tapping the lot itself
+    m.on('click', (e) => { L.DomEvent.stopPropagation(e); l.fire('click', { latlng: c, originalEvent: e.originalEvent }); });
+    badges.addLayer(m);
+  });
+  map.off('zoomend', restyleParking);
+  map.on('zoomend', restyleParking);
+  restyleParking();
+  return L.featureGroup([parkingVisual, hit, badges]);
+}
+
+function renderSegmentsToggle() {
+  const t = document.getElementById('segments-toggle');
+  if (!t) return;
+  t.setAttribute('aria-checked', String(parkingVisible));
+  document.getElementById('legend').classList.toggle('dim', !parkingVisible);
+}
+
+// Admin curation needs the segments to be tappable, so it always shows them.
+function applyParkingVisibility() {
+  if (parkingLayer) {
+    const show = parkingVisible || isAdminMode;
+    if (show && !map.hasLayer(parkingLayer)) parkingLayer.addTo(map);
+    else if (!show && map.hasLayer(parkingLayer)) map.removeLayer(parkingLayer);
+  }
+  renderSegmentsToggle();
+}
+
+function toggleSegments() {
+  parkingVisible = !parkingVisible;
+  lsSet(SEG_PREF_KEY, parkingVisible ? 'on' : 'off');
+  applyParkingVisibility();
+  gaEvent('segments_toggle', { visible: parkingVisible ? 1 : 0 });
+}
+
+// Honest label for where the street traffic comes from (menu footer).
+function updateDataSourceTag(data) {
+  const el = document.getElementById('data-source-tag');
+  const src = data.data_source || {};
+  const names = { here: 'HERE', tomtom: 'TomTom', yandex: 'Yandex' };
+  if (src.mode === 'live') el.textContent = `live traffic · ${names[src.provider] || src.provider}`;
+  else if (src.mode === 'warming_up') el.textContent = 'live traffic connecting…';
+  else el.textContent = 'simulated traffic';
+}
+
+// ---- Traffic badge ------------------------------------------------------------
+// Circular 0-10 traffic score + level text (home pill).
 function updateTrafficBadge(data) {
   const score = data.overall_traffic_score != null
     ? data.overall_traffic_score
@@ -2627,7 +2668,82 @@ function updateTrafficBadge(data) {
   });
 }
 
-// --- Keep the page from scrolling, and the sheet above the on-screen keyboard ---------------
+// ---- Nudges: ONE card at a time (location first, then install) -----------------
+let nudgeType = null;
+let deferredInstallPrompt = null;
+const NUDGE_SNOOZE_MS = 7 * 24 * 3600 * 1000;
+
+const NUDGES = {
+  location: { title: 'Find parking near you', body: 'See spots around you. Your parking gets logged automatically.', cta: 'Turn on', icon: 'n-location' },
+  install:  { title: 'Add parkaway to your home screen', body: 'One tap to check parking before you leave.', cta: 'Add', icon: 'n-install' },
+  ios:      { title: 'Add to your home screen', body: 'Tap the Share button, then “Add to Home Screen”.', cta: 'Got it', icon: 'n-install' }
+};
+
+function showNudge(type) {
+  if (nudgeType && nudgeType !== type) return;           // never stack two nudges
+  if (Date.now() < parseInt(lsGet('parkaway.snooze.' + type, '0'), 10)) return;
+  nudgeType = type;
+  const n = NUDGES[type];
+  document.getElementById('nudge-title').textContent = n.title;
+  document.getElementById('nudge-body').textContent = n.body;
+  document.getElementById('nudge-cta').textContent = n.cta;
+  document.getElementById('nudge-ico').className = 'nudge-ico ' + n.icon;
+  document.getElementById('nudge-card').classList.add('show');
+  gaEvent('nudge_shown', { type });
+}
+
+function hideNudge() {
+  nudgeType = null;
+  document.getElementById('nudge-card').classList.remove('show');
+}
+
+function nudgeAccept() {
+  const type = nudgeType;
+  gaEvent('nudge_accept', { type });
+  hideNudge();
+  if (type === 'location') initGeolocation();
+  else if (type === 'install' && deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    deferredInstallPrompt.userChoice.finally(() => { deferredInstallPrompt = null; });
+  } else if (type === 'ios') lsSet('parkaway.snooze.ios', String(Date.now() + 90 * 24 * 3600 * 1000));
+}
+
+function nudgeDismiss() {
+  if (!nudgeType) return;
+  gaEvent('nudge_dismiss', { type: nudgeType });
+  lsSet('parkaway.snooze.' + nudgeType, String(Date.now() + NUDGE_SNOOZE_MS));
+  hideNudge();
+}
+
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+const isIosSafari = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+// Install is only worth asking after the visitor has actually got value (a destination viewed).
+function maybeShowInstallNudge() {
+  if (nudgeType || isStandalone()) return;
+  if ((parseInt(lsGet('parkaway.dests', '0'), 10) || 0) < 1) return;
+  if (deferredInstallPrompt) showNudge('install');
+  else if (isIosSafari() && (parseInt(lsGet('parkaway.visits', '0'), 10) || 0) >= 2) showNudge('ios');
+}
+
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstallPrompt = e; });
+window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; if (nudgeType === 'install') hideNudge(); gaEvent('app_installed', {}); });
+
+// Ask for location in context (a friendly card), not with a cold browser prompt on page load.
+function initLocationGate() {
+  if (!('geolocation' in navigator)) return;
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then(p => {
+      if (p.state === 'granted') initGeolocation();
+      else if (p.state === 'prompt') showNudge('location');
+      p.onchange = () => { if (p.state === 'granted') { if (nudgeType === 'location') hideNudge(); initGeolocation(); } };
+    }).catch(() => showNudge('location'));
+  } else {
+    showNudge('location');
+  }
+}
+
+// ---- Keep the page from scrolling, and the sheet above the on-screen keyboard ---
 // iOS pans the page when a text field is focused and rubber-bands it when you drag on a
 // non-scrolling part of the sheet. The CSS pins the document; this covers the rest.
 function syncViewport() {
@@ -2652,15 +2768,46 @@ document.addEventListener('touchmove', (e) => {
   }
 }, { passive: false });
 
+// ---- Boot ---------------------------------------------------------------------
 function initSheetUI() {
   const input = document.getElementById('search-input');
-  // Tapping the search bar expands the sheet to full-screen search.
-  input.addEventListener('focus', () => {
-    if (sheetMode !== 'search') setSheetMode('search');
+  // Tapping the search field (e.g. from the destination header) opens full search.
+  input.addEventListener('focus', () => { if (sheetMode !== 'search') setSheetMode('search'); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSearchMode(); });
+
+  // The attention cues on "Where to?" play on first load only, not every time home is shown.
+  document.body.classList.add('intro');
+  setTimeout(() => document.body.classList.remove('intro'), 5200);
+
+  renderSegmentsToggle();
+  lsSet('parkaway.visits', String((parseInt(lsGet('parkaway.visits', '0'), 10) || 0) + 1));
+  initLocationGate();
+
+  // Come back to the app: refresh what is shown so it never looks stale.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    refreshOutlook(); fetchTraffic(); fetchWeather();
   });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSearchMode();
-  });
+  setInterval(refreshOutlook, 60000);
+
+  // Home-screen shortcuts (manifest) open straight into search / traffic.
+  const action = new URLSearchParams(location.search).get('a');
+  if (action) {
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+    if (action === 'search') openSearch();
+    else if (action === 'traffic') openTraffic();
+  }
+
+  // A one-time pointer to the map's other superpower, for people who haven't used it yet.
+  if (!lsGet('parkaway.hintSeen', '')) {
+    setTimeout(() => {
+      if (currentDest || sheetMode !== 'home') return;
+      const hint = document.getElementById('hint-banner');
+      hint.classList.add('show');
+      lsSet('parkaway.hintSeen', '1');
+      setTimeout(() => hint.classList.remove('show'), 5000);
+    }, 6000);
+  }
 }
 document.addEventListener('DOMContentLoaded', initSheetUI);
 </script>

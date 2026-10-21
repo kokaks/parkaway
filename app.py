@@ -129,7 +129,47 @@ YEREVAN_STREET_SYNONYMS = {
 }
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db').replace("postgres://", "postgresql://", 1)
+def _resolve_database_url() -> str:
+    """
+    Normalises DATABASE_URL and matches its driver to what is actually installed.
+    Render hands out postgres:// or postgresql:// URLs; SQLAlchemy then defaults to
+    psycopg2, while a postgresql+psycopg:// URL needs psycopg (v3). Whichever one
+    the URL asks for, fall back to the other if only that one is installed, so a
+    mismatch between the URL and requirements.txt can't crash the deploy.
+    """
+    import importlib.util
+    url = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db')
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if not url.startswith("postgresql"):
+        return url
+
+    scheme, rest = url.split("://", 1)
+    wanted = scheme.split("+", 1)[1] if "+" in scheme else None
+    have_v3 = importlib.util.find_spec("psycopg") is not None
+    have_v2 = importlib.util.find_spec("psycopg2") is not None
+
+    # Always name the driver explicitly. Newer SQLAlchemy releases changed what a bare
+    # postgresql:// URL means (psycopg2 -> psycopg v3), so relying on the default breaks
+    # whenever the installed SQLAlchemy and the installed driver disagree.
+    driver = wanted
+    if wanted in (None, "psycopg2") and have_v2:
+        driver = "psycopg2"
+    elif wanted in (None, "psycopg2") and have_v3:
+        driver = "psycopg"
+    elif wanted == "psycopg" and not have_v3 and have_v2:
+        driver = "psycopg2"
+    print(f"[db] PostgreSQL drivers installed: psycopg2={have_v2}, psycopg={have_v3}; "
+          f"URL asked for '{wanted or 'default'}', using '{driver or 'psycopg2 (SQLAlchemy default)'}'.")
+    if not (have_v2 or have_v3):
+        raise RuntimeError(
+            "DATABASE_URL points at PostgreSQL but no PostgreSQL driver is installed in this build. "
+            "Add 'psycopg2-binary' to requirements.txt (repo root), push, and check the Render build log "
+            "shows it being installed.")
+    return f"postgresql+{driver}://{rest}" if driver else f"postgresql://{rest}"
+
+
+app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_url()
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 

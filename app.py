@@ -25,6 +25,9 @@ Production-ready Flask backend that:
      stopped for good (replaces the old manual "I Parked Here" endpoint).
  11. Serves the brand logo as vector icons (/icon.svg, /icon-maskable.svg) used
      by the tab icon, the PWA manifest and the iOS home-screen icon.
+ 12. Live data layer: real per-street traffic (HERE / TomTom / Yandex Router, whichever has a
+     key; otherwise a per-street simulation), an OpenStreetMap POI inventory with opening hours,
+     optional BestTime live busyness. Admin diagnostics at /api/admin/data-sources.
 
 Run:
     pip install -r requirements.txt
@@ -43,6 +46,7 @@ import os
 import random
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -125,47 +129,7 @@ YEREVAN_STREET_SYNONYMS = {
 }
 
 app = Flask(__name__)
-def _resolve_database_url() -> str:
-    """
-    Normalises DATABASE_URL and matches its driver to what is actually installed.
-    Render hands out postgres:// or postgresql:// URLs; SQLAlchemy then defaults to
-    psycopg2, while a postgresql+psycopg:// URL needs psycopg (v3). Whichever one
-    the URL asks for, fall back to the other if only that one is installed, so a
-    mismatch between the URL and requirements.txt can't crash the deploy.
-    """
-    import importlib.util
-    url = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db')
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
-    if not url.startswith("postgresql"):
-        return url
-
-    scheme, rest = url.split("://", 1)
-    wanted = scheme.split("+", 1)[1] if "+" in scheme else None
-    have_v3 = importlib.util.find_spec("psycopg") is not None
-    have_v2 = importlib.util.find_spec("psycopg2") is not None
-
-    # Always name the driver explicitly. Newer SQLAlchemy releases changed what a bare
-    # postgresql:// URL means (psycopg2 -> psycopg v3), so relying on the default breaks
-    # whenever the installed SQLAlchemy and the installed driver disagree.
-    driver = wanted
-    if wanted in (None, "psycopg2") and have_v2:
-        driver = "psycopg2"
-    elif wanted in (None, "psycopg2") and have_v3:
-        driver = "psycopg"
-    elif wanted == "psycopg" and not have_v3 and have_v2:
-        driver = "psycopg2"
-    print(f"[db] PostgreSQL drivers installed: psycopg2={have_v2}, psycopg={have_v3}; "
-          f"URL asked for '{wanted or 'default'}', using '{driver or 'psycopg2 (SQLAlchemy default)'}'.")
-    if not (have_v2 or have_v3):
-        raise RuntimeError(
-            "DATABASE_URL points at PostgreSQL but no PostgreSQL driver is installed in this build. "
-            "Add 'psycopg2-binary' to requirements.txt (repo root), push, and check the Render build log "
-            "shows it being installed.")
-    return f"postgresql+{driver}://{rest}" if driver else f"postgresql://{rest}"
-
-
-app.config['SQLALCHEMY_DATABASE_URI'] = _resolve_database_url()
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local_parking.db').replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -388,6 +352,17 @@ class ParkingDetection(db.Model):
     undone = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+
+class LiveData(db.Model):
+    """Shared cache for live-data results (traffic readings, POI inventory, quotas), one row per key,
+    so every worker process reads and writes the same data."""
+    __tablename__ = 'live_data'
+
+    key = db.Column(db.String(80), primary_key=True)
+    payload = db.Column(db.Text)
+    updated_at = db.Column(db.Float, default=0.0)
+    claimed_at = db.Column(db.Float, default=0.0)   # compare-and-set lock for "who refreshes this key"
+
 # --------------------------------------------------------------------------
 # Contextual Factor 1: Destination POI Busyness Model & Data
 # --------------------------------------------------------------------------
@@ -529,78 +504,1077 @@ def get_poi_hourly_factor(poi_type: str, hour: int, is_weekend: bool) -> float:
         return 0.50
     return 0.40
 
-_BUSYNESS_CACHE: dict[str, tuple[float, float]] = {}
+_BUSYNESS_CACHE: dict = {}
 
-def calculate_destination_busyness(lat: float, lon: float, now: datetime | None = None) -> float:
+# ==========================================================================
+# LIVE DATA LAYER
+#
+#   street traffic  - real per-street readings (HERE / TomTom / Yandex Router),
+#                     or a per-street simulation when no key is configured
+#   POI busyness    - a real POI inventory (OpenStreetMap, incl. opening hours)
+#                     plus live signals (traffic pressure, optional BestTime)
+#
+# Design rules:
+#   * nothing here may ever make a request fail: every external call is wrapped,
+#     time-boxed, budgeted, and falls back to the simulation
+#   * external calls never run inside a user request: they run in a background
+#     thread, one worker at a time (a DB row is the lock), and requests read the
+#     cached result (stale-while-revalidate)
+#   * nothing is polled while nobody is using the app, so quotas aren't burned
+# ==========================================================================
+
+# ---- environment ----------------------------------------------------------
+#   TRAFFIC_PROVIDER      auto (default) | here | tomtom | yandex | simulated
+#   HERE_API_KEY          HERE Traffic API v7   (free plan: ~250k requests/month)
+#   TOMTOM_API_KEY        TomTom Traffic Flow   (free plan: 2,500 requests/day)
+#   YANDEX_ROUTING_API_KEY  Yandex Router API   (already used by this app)
+#   HERE_MONTHLY_BUDGET / TOMTOM_DAILY_BUDGET / YANDEX_DAILY_BUDGET   hard caps
+#   TRAFFIC_TTL_S         how long a reading is considered fresh (default 180 HERE, 900 others)
+#   POI_SOURCE            auto (default) | curated    (curated = built-in list only)
+#   OVERPASS_URL          override the OpenStreetMap Overpass endpoint
+#   BESTTIME_API_KEY      optional: live "busier than usual" for landmarks (paid after trial)
+#   BESTTIME_MONTHLY_BUDGET   cap on BestTime calls (default 60)
+_YANDEX_PLACEHOLDER_KEY = "a3c71f9f-d1d6-4319-a690-e1866877ac8e"
+_UA = "parkaway/1.0 (parking recommender)"
+
+
+def _provider_keys() -> dict:
+    yandex = os.environ.get("YANDEX_ROUTING_API_KEY", "").strip()
+    return {
+        "here": os.environ.get("HERE_API_KEY", "").strip(),
+        "tomtom": os.environ.get("TOMTOM_API_KEY", "").strip(),
+        "yandex": "" if yandex == _YANDEX_PLACEHOLDER_KEY else yandex,
+    }
+
+
+def _active_traffic_provider():
+    """The provider to use: the one forced by TRAFFIC_PROVIDER, else the first configured."""
+    pref = os.environ.get("TRAFFIC_PROVIDER", "auto").strip().lower()
+    keys = _provider_keys()
+    if pref == "simulated":
+        return None
+    if pref in keys:
+        return pref if keys[pref] else None
+    for name in ("here", "tomtom", "yandex"):
+        if keys[name]:
+            return name
+    return None
+
+
+def _redact(text) -> str:
+    """Error text safe to log: API keys never reach the logs."""
+    s = str(text)
+    for k in list(_provider_keys().values()) + [os.environ.get("BESTTIME_API_KEY", "").strip()]:
+        if k:
+            s = s.replace(k, "***")
+    return s
+
+
+def _http_json(url, timeout=7.0, method="GET", data=None, headers=None):
+    hdrs = {"User-Agent": _UA, "Accept": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+# ---- shared cache (one DB row per key, so every worker sees the same data) ----
+def _ld_get(key):
+    row = LiveData.query.get(key)
+    if row is None or not row.payload:
+        return None, 0.0
+    try:
+        return json.loads(row.payload), float(row.updated_at or 0.0)
+    except Exception:
+        return None, 0.0
+
+
+def _ld_put(key, obj):
+    row = LiveData.query.get(key)
+    if row is None:
+        row = LiveData(key=key, claimed_at=0.0)
+        db.session.add(row)
+    row.payload = json.dumps(obj, separators=(",", ":"))
+    row.updated_at = time.time()
+    db.session.commit()
+
+
+def _ld_claim(key, hold_s):
+    """
+    Atomically takes the right to refresh `key`: returns True for exactly one caller
+    per hold window, across every worker process (a compare-and-set on the row).
+    """
+    now = time.time()
+    try:
+        if LiveData.query.get(key) is None:
+            try:
+                db.session.add(LiveData(key=key, payload=None, updated_at=0.0, claimed_at=0.0))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        n = (LiveData.query
+             .filter(LiveData.key == key, LiveData.claimed_at < now - hold_s)
+             .update({"claimed_at": now}, synchronize_session=False))
+        db.session.commit()
+        return n == 1
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def _budget_limit(provider):
+    env_names = {"here": ("HERE_MONTHLY_BUDGET", 100000, "%Y%m"),
+                 "tomtom": ("TOMTOM_DAILY_BUDGET", 2400, "%Y%m%d"),
+                 "yandex": ("YANDEX_DAILY_BUDGET", 800, "%Y%m%d"),
+                 "besttime": ("BESTTIME_MONTHLY_BUDGET", 60, "%Y%m")}
+    name, default, fmt = env_names[provider]
+    try:
+        limit = int(os.environ.get(name, default))
+    except ValueError:
+        limit = default
+    return limit, fmt
+
+
+def _budget_take(provider, cost=1) -> bool:
+    """Counts a request against the provider's quota BEFORE making it. False = over budget."""
+    limit, fmt = _budget_limit(provider)
+    key = f"budget:{provider}:{datetime.utcnow().strftime(fmt)}"
+    used, _ = _ld_get(key)
+    used = int(used or 0)
+    if used + cost > limit:
+        return False
+    _ld_put(key, used + cost)
+    return True
+
+
+def _run_in_background(fn, *args):
+    def runner():
+        with app.app_context():
+            try:
+                fn(*args)
+            except Exception as exc:
+                print(f"[live] background task {getattr(fn, '__name__', 'fn')} failed ({_redact(exc)})")
+            finally:
+                db.session.remove()
+    if os.environ.get("LIVE_DATA_SYNC") == "1":      # tests / debugging: run inline
+        fn(*args)
+        return
+    threading.Thread(target=runner, daemon=True).start()
+
+
+# ---- geometry ----------------------------------------------------------------
+def _flatten_points(coords):
+    out = []
+
+    def rec(x):
+        if isinstance(x, (list, tuple)) and len(x) >= 2 and isinstance(x[0], (int, float)) and isinstance(x[1], (int, float)):
+            out.append((float(x[0]), float(x[1])))
+        elif isinstance(x, (list, tuple)):
+            for y in x:
+                rec(y)
+    rec(coords)
+    # features are stored [lon, lat] (GeoJSON) but older rows can be [lat, lon]
+    return [(a, b) if (38.0 <= a <= 42.0 and 43.0 <= b <= 47.0) else (b, a) for a, b in out]
+
+
+def _xy(lat, lon, lat0):
+    return lon * 111320.0 * math.cos(math.radians(lat0)), lat * 110540.0
+
+
+def _dist_to_polyline_m(lat, lon, pts):
+    if not pts:
+        return float("inf")
+    px, py = _xy(lat, lon, lat)
+    if len(pts) == 1:
+        qx, qy = _xy(pts[0][0], pts[0][1], lat)
+        return math.hypot(px - qx, py - qy)
+    best = float("inf")
+    ax, ay = _xy(pts[0][0], pts[0][1], lat)
+    for i in range(1, len(pts)):
+        bx, by = _xy(pts[i][0], pts[i][1], lat)
+        dx, dy = bx - ax, by - ay
+        seg2 = dx * dx + dy * dy
+        t = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg2))
+        best = min(best, math.hypot(px - (ax + t * dx), py - (ay + t * dy)))
+        ax, ay = bx, by
+    return best
+
+
+_SEG_INDEX = {"ts": 0.0, "by_id": {}}
+
+
+def _segment_index():
+    """id -> {id, name, type, lat, lon, points}; refreshed from the DB at most once a minute."""
+    now = time.time()
+    if now - _SEG_INDEX["ts"] < 60 and _SEG_INDEX["by_id"]:
+        return _SEG_INDEX
+    try:
+        feats = _get_live_features()
+    except Exception:
+        feats = PARKING_FEATURES
+    by_id = {}
+    for f in feats:
+        try:
+            lat, lon = _extract_lat_lon(f)
+            by_id[f["id"]] = {
+                "id": f["id"],
+                "name": (f.get("name") or "Unnamed segment"),
+                "type": f.get("parking_type", "unspecified"),
+                "geom": f.get("geometry_type"),
+                "lat": lat, "lon": lon,
+                "points": _flatten_points(f.get("coordinates")),
+            }
+        except Exception:
+            continue
+    _SEG_INDEX["by_id"] = by_id
+    _SEG_INDEX["ts"] = now
+    return _SEG_INDEX
+
+
+# --------------------------------------------------------------------------
+# Street traffic: simulation (used when no live data is available)
+#
+# The old simulator ran every street off ONE hourly curve (+/-9 random), so all
+# streets rose and fell together. Here every street has its own personality
+# (road class, commute direction, lunch/dinner pull, drifting noise, the odd
+# incident), so at any moment some streets are heavy while others are free.
+# --------------------------------------------------------------------------
+_PROFILES: dict = {}
+_GENERIC_NAME_WORDS = {"street", "st", "avenue", "ave", "str", "lane", "road", "rd", "blvd", "boulevard",
+                       "parking", "lot", "complex", "the", "of", "and", "south", "north", "east", "west", "(south)", "(north)"}
+
+
+def _name_tokens(name: str) -> set:
+    return {w for w in re.split(r"[^a-z0-9]+", (name or "").lower()) if len(w) > 2 and w not in _GENERIC_NAME_WORDS}
+
+
+def _street_profile(name: str) -> dict:
+    p = _PROFILES.get(name)
+    if p:
+        return p
+    n = (name or "").lower()
+    rnd = random.Random("profile|" + n)
+    if any(w in n for w in ("avenue", " ave", "highway", "prospekt", "boulevard", "bridge")):
+        size = 0.98
+    elif any(w in n for w in ("street", " st", "road")):
+        size = 0.74
+    else:
+        size = 0.60
+    p = {
+        "size": max(0.35, min(1.05, size + rnd.uniform(-0.12, 0.10))),
+        "am_bias": rnd.uniform(-1.0, 1.0),        # >0: heavier toward the city in the morning, <0: out in the evening
+        "phase_min": rnd.uniform(-35, 35),        # this street peaks a bit earlier/later than the city curve
+        "rush": rnd.uniform(0.65, 1.35),          # how hard the commute peaks hit this street
+        "midday": rnd.uniform(0.6, 1.4),          # shops, offices, lunch
+        "nightlife": rnd.uniform(0.0, 1.0),       # dining / bar streets
+        "periods": (rnd.uniform(26, 52), rnd.uniform(70, 130)),
+        "phases": (rnd.random(), rnd.random()),
+    }
+    _PROFILES[name] = p
+    return p
+
+
+def _bump(t_min: float, mu_min: float, sigma_min: float) -> float:
+    d = abs(t_min - mu_min)
+    d = min(d, 1440.0 - d)
+    return math.exp(-0.5 * (d / sigma_min) ** 2)
+
+
+def _curve_at(minutes: float, weekend: bool) -> float:
+    h = (minutes / 60.0) % 24.0
+    lo = int(h)
+    frac = h - lo
+    a = _hour_congestion_curve(lo, weekend)
+    b = _hour_congestion_curve((lo + 1) % 24, weekend)
+    return a + (b - a) * frac
+
+
+def _simulated_traffic(name: str, lat: float, lon: float, ptype: str, now: datetime) -> dict:
+    """-> {c: congestion 0-100, typical: the same without noise/incidents}"""
+    if ptype == "unavailable":
+        return {"c": 0.0, "typical": 0.0}
+    prof = _street_profile(name)
+    weekend = now.weekday() >= 5
+    t = now.hour * 60 + now.minute + prof["phase_min"]
+
+    city = _curve_at(t, weekend)
+    commute = 0.35 if weekend else 1.0
+    am = _bump(t, 8.5 * 60, 75) * (1.0 + 0.45 * prof["am_bias"]) * commute
+    pm = _bump(t, 18.0 * 60, 95) * (1.0 - 0.45 * prof["am_bias"]) * commute
+    mid = _bump(t, 13.0 * 60, 120) * prof["midday"] * (1.25 if weekend else 1.0)
+    eve = _bump(t, 20.5 * 60, 90) * prof["nightlife"] * (1.3 if weekend else 0.9)
+    shape = 0.36 * city + 0.30 * prof["rush"] * (am + pm) + 0.14 * mid + 0.16 * eve
+
+    dist_center = haversine_m(lat, lon, MAP_CENTER[0], MAP_CENTER[1])
+    centrality = 1.12 - 0.30 * min(1.0, dist_center / 2500.0)
+    typical = max(0.0, min(100.0, 100.0 * prof["size"] * shape * centrality))
+
+    abs_min = now.timestamp() / 60.0
+    p1, p2 = prof["periods"]
+    f1, f2 = prof["phases"]
+    noise = 8.0 * math.sin(2 * math.pi * (abs_min / p1 + f1)) + 5.0 * math.sin(2 * math.pi * (abs_min / p2 + f2))
+
+    bucket = int(abs_min // 30)
+    r = random.Random(f"incident|{name.lower()}|{bucket}")
+    p_inc = 0.035 if 7 <= now.hour <= 21 else 0.012
+    incident = 0.0
+    if r.random() < p_inc:
+        incident = r.uniform(18, 40) * math.sin(math.pi * ((abs_min % 30) / 30.0))
+
+    c = max(0.0, min(100.0, typical + noise + incident))
+    if ptype == "lot":                      # a lot is a destination, not a through street
+        c, typical = c * 0.45, typical * 0.45
+    return {"c": c, "typical": typical}
+
+
+# --------------------------------------------------------------------------
+# Street traffic: live providers
+# --------------------------------------------------------------------------
+def _slowdown_to_congestion(slowdown: float) -> float:
+    """1 - current/free-flow speed -> 0-100. 20% slower ~ 33, 40% ~ 67, 60%+ = 100."""
+    return max(0.0, min(100.0, slowdown / 0.6 * 100.0))
+
+
+def _traffic_ttl(provider) -> float:
+    try:
+        return float(os.environ["TRAFFIC_TTL_S"])
+    except (KeyError, ValueError):
+        return 180.0 if provider == "here" else 900.0
+
+
+def _here_readings(segs):
+    """
+    HERE Traffic API v7 /flow: ONE request returns every road link in a circle,
+    with its geometry, current speed, free-flow speed and jamFactor (0-10).
+    Each parking segment is matched to the nearest link(s) within 35 m.
+    """
+    key = _provider_keys()["here"]
+    far = max((haversine_m(MAP_CENTER[0], MAP_CENTER[1], s["lat"], s["lon"]) for s in segs), default=0.0)
+    radius = int(min(8000, max(700, far + 450)))
+    url = "https://data.traffic.hereapi.com/v7/flow?" + urllib.parse.urlencode({
+        "in": f"circle:{MAP_CENTER[0]},{MAP_CENTER[1]};r={radius}",
+        "locationReferencing": "shape",
+        "apiKey": key,
+    })
+    if not _budget_take("here"):
+        raise RuntimeError("HERE monthly budget exhausted")
+    data = _http_json(url, timeout=10)
+
+    links = []
+    for r in data.get("results", []) or []:
+        cf = r.get("currentFlow") or {}
+        loc = r.get("location") or {}
+        speed, free, jam, conf = cf.get("speed"), cf.get("freeFlow"), cf.get("jamFactor"), cf.get("confidence")
+        if conf is not None and conf < 0.25:
+            continue
+        for link in (loc.get("shape") or {}).get("links", []) or []:
+            pts = [(p["lat"], p["lng"]) for p in link.get("points", []) if "lat" in p and "lng" in p]
+            if len(pts) >= 2:
+                links.append({"pts": pts, "jam": jam, "speed": speed, "free": free,
+                              "tokens": _name_tokens(loc.get("description") or ""),
+                              "bbox": (min(p[0] for p in pts), max(p[0] for p in pts),
+                                       min(p[1] for p in pts), max(p[1] for p in pts))})
+
+    cell = 0.003
+    grid: dict = {}
+    pad = 0.0006
+    for i, ln in enumerate(links):
+        la0, la1, lo0, lo1 = ln["bbox"]
+        for ix in range(int((la0 - pad) / cell), int((la1 + pad) / cell) + 1):
+            for iy in range(int((lo0 - pad) / cell), int((lo1 + pad) / cell) + 1):
+                grid.setdefault((ix, iy), []).append(i)
+
+    readings = {}
+    now = time.time()
+    for s in segs:
+        if s["type"] == "lot" or len(s["points"]) < 2:
+            continue
+        pts = s["points"]
+        mid = pts[len(pts) // 2] if len(pts) >= 3 else ((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2)
+        samples = [pts[0], mid, pts[-1]]
+        seg_tokens = _name_tokens(s["name"])
+        cand = {}
+        for (la, lo) in samples:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for i in grid.get((int(la / cell) + dx, int(lo / cell) + dy), ()):
+                        cand.setdefault(i, None)
+        scored = []
+        for i in cand:
+            ln = links[i]
+            ds = sorted(_dist_to_polyline_m(la, lo, ln["pts"]) for (la, lo) in samples)
+            d = ds[1]                                   # median: a street that merely CROSSES this road touches it at one end only
+            if d <= 35.0:
+                rank = d - (10.0 if (seg_tokens and ln["tokens"] & seg_tokens) else 0.0)
+                scored.append((rank, d, ln))
+        if not scored:
+            continue
+        scored.sort(key=lambda x: x[0])
+        best_rank = scored[0][0]
+        chosen = [ln for rank, d, ln in scored if rank <= best_rank + 5.0][:4]
+        cs, sp, fr = [], [], []
+        for ln in chosen:
+            if ln["jam"] is not None:
+                cs.append(min(100.0, float(ln["jam"]) * 10.0))
+            elif ln["speed"] and ln["free"]:
+                cs.append(_slowdown_to_congestion(1.0 - float(ln["speed"]) / float(ln["free"])))
+            if ln["speed"] is not None:
+                sp.append(float(ln["speed"]) * 3.6)       # m/s -> km/h
+            if ln["free"] is not None:
+                fr.append(float(ln["free"]) * 3.6)
+        if cs:
+            readings[s["id"]] = {"c": round(sum(cs) / len(cs), 1),
+                                 "s": round(sum(sp) / len(sp), 1) if sp else None,
+                                 "f": round(sum(fr) / len(fr), 1) if fr else None,
+                                 "ts": now}
+    return readings
+
+
+def _probe_tomtom(seg):
+    """TomTom Flow Segment Data: the road segment nearest to a point -> current vs free-flow speed."""
+    pts = seg["points"]
+    la, lo = pts[len(pts) // 2] if pts else (seg["lat"], seg["lon"])
+    url = ("https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?" +
+           urllib.parse.urlencode({"key": _provider_keys()["tomtom"], "point": f"{la},{lo}", "unit": "KMPH", "thickness": 1}))
+    if not _budget_take("tomtom"):
+        raise RuntimeError("TomTom daily budget exhausted")
+    d = (_http_json(url, timeout=6).get("flowSegmentData")) or {}
+    cur, free = d.get("currentSpeed"), d.get("freeFlowSpeed")
+    if d.get("roadClosure"):
+        return {"c": 100.0, "s": 0.0, "f": free}
+    if not cur and cur != 0 or not free:
+        return None
+    conf = d.get("confidence")
+    if conf is not None and conf < 0.3:
+        return None
+    return {"c": round(_slowdown_to_congestion(1.0 - float(cur) / float(free)), 1), "s": float(cur), "f": float(free)}
+
+
+def _probe_yandex(seg):
+    """
+    Yandex Router API: route from one end of the segment to the other and compare the
+    time with traffic to the time without. (Same response fields this app already read.)
+    """
+    pts = seg["points"]
+    if len(pts) < 2:
+        return None
+    a, b = pts[0], pts[-1]
+    if haversine_m(a[0], a[1], b[0], b[1]) < 50:
+        return None                                     # too short for a meaningful ratio
+    waypoints = urllib.parse.quote(f"{a[0]},{a[1]}|{b[0]},{b[1]}", safe=",|")
+    url = (f"https://api.routing.yandex.net/v2/route?waypoints={waypoints}&mode=driving"
+           f"&apikey={urllib.parse.quote(_provider_keys()['yandex'])}")
+    if not _budget_take("yandex"):
+        raise RuntimeError("Yandex daily budget exhausted")
+    data = _http_json(url, timeout=6)
+    legs = ((data.get("route") or {}).get("legs")) or []
+    t_free = t_traffic = dist = 0.0
+    for leg in legs:
+        w = leg.get("weight") or {}
+        tf = (w.get("time") or {}).get("value")
+        tt = (w.get("time_with_traffic") or {}).get("value", tf)
+        if tf:
+            t_free += float(tf)
+            t_traffic += float(tt if tt is not None else tf)
+        dist += float((w.get("distance") or {}).get("value") or 0)
+    if t_free <= 0:
+        return None
+    ratio = t_traffic / t_free
+    return {"c": round(max(0.0, min(100.0, (ratio - 1.0) * 100.0)), 1),
+            "s": round(dist / t_traffic * 3.6, 1) if (dist and t_traffic) else None, "f": None}
+
+
+_PROBES = {"tomtom": _probe_tomtom, "yandex": _probe_yandex}
+_MAX_PROBES_PER_CYCLE = 25
+
+
+def _refresh_traffic():
+    """Runs in a background thread: asks the active provider for fresh readings and stores them."""
+    provider = _active_traffic_provider()
+    if not provider:
+        return
+    status, _ = _ld_get("traffic:status")
+    status = status or {}
+    now = time.time()
+    if now < status.get("backoff_until", 0):
+        return
+    segs = [s for s in _segment_index()["by_id"].values() if s["type"] != "unavailable"]
+    doc, _ = _ld_get("traffic:live")
+    if not doc or doc.get("provider") != provider:
+        doc = {"provider": provider, "readings": {}, "fetched_at": 0.0}
+    ttl = _traffic_ttl(provider)
+    try:
+        if provider == "here":
+            doc["readings"] = _here_readings(segs)
+        else:
+            probe = _PROBES[provider]
+            ids = {s["id"] for s in segs}
+            doc["readings"] = {k: v for k, v in doc["readings"].items() if k in ids}
+            due = [s for s in segs if s["type"] != "lot" and len(s["points"]) >= 2 and
+                   now - doc["readings"].get(s["id"], {}).get("ts", 0.0) > ttl]
+            due.sort(key=lambda s: doc["readings"].get(s["id"], {}).get("ts", 0.0))
+            fails = 0
+            out_of_quota = False
+            for s in due[:_MAX_PROBES_PER_CYCLE]:
+                try:
+                    r = probe(s)
+                    if r:
+                        r["ts"] = time.time()
+                        doc["readings"][s["id"]] = r
+                    fails = 0
+                except RuntimeError as exc:   # out of quota: keep what was collected, try again later
+                    out_of_quota = True
+                    status["last_error"] = _redact(exc)
+                    break
+                except Exception as exc:
+                    fails += 1
+                    status["last_error"] = _redact(exc)
+                    if fails >= 3:
+                        raise
+            if out_of_quota:
+                status["backoff_until"] = time.time() + 900.0
+        doc["fetched_at"] = time.time()
+        _ld_put("traffic:live", doc)
+        status.update({"provider": provider, "last_ok": time.time(), "fail_streak": 0,
+                       "backoff_until": status.get("backoff_until", 0) if provider != "here" else 0,
+                       "readings": len(doc["readings"]), "segments": len(segs)})
+        if not (provider != "here" and status.get("backoff_until", 0) > time.time()):
+            status["last_error"] = None
+    except Exception as exc:
+        streak = int(status.get("fail_streak", 0)) + 1
+        status.update({"provider": provider, "fail_streak": streak, "last_error": _redact(exc),
+                       "backoff_until": time.time() + min(900.0, 60.0 * (2 ** min(streak, 4)))})
+        print(f"[traffic] {provider} refresh failed ({_redact(exc)}); using simulated/last-known data")
+    _ld_put("traffic:status", status)
+
+
+_TRAFFIC_MEM = {"loaded": 0.0, "doc": None, "est": {}, "pressure": [], "provider": None}
+
+
+def _traffic_view():
+    """Per-process view of the stored live data, reloaded every 15 s; kicks off a background refresh when stale."""
+    now = time.time()
+    if now - _TRAFFIC_MEM["loaded"] < 15:
+        return _TRAFFIC_MEM
+    _TRAFFIC_MEM["loaded"] = now
+    provider = _active_traffic_provider()
+    _TRAFFIC_MEM["provider"] = provider
+    if not provider:
+        _TRAFFIC_MEM.update(doc=None, est={}, pressure=[])
+        return _TRAFFIC_MEM
+    try:
+        doc, _ = _ld_get("traffic:live")
+        if doc and doc.get("provider") != provider:
+            doc = None
+        _TRAFFIC_MEM["doc"] = doc
+        ttl = _traffic_ttl(provider)
+        stale_after = ttl if provider == "here" else 120.0
+        if (not doc or now - doc.get("fetched_at", 0) > stale_after) and _ld_claim("traffic:refresh", 45):
+            _run_in_background(_refresh_traffic)
+        _rebuild_traffic_estimates()
+    except Exception as exc:
+        print(f"[traffic] cache read failed ({_redact(exc)})")
+    return _TRAFFIC_MEM
+
+
+def _fresh_reading(doc, seg_id, provider, now):
+    if not doc:
+        return None
+    r = (doc.get("readings") or {}).get(seg_id)
+    if r and now - r.get("ts", 0) <= max(3 * _traffic_ttl(provider), 1800.0):
+        return r
+    return None
+
+
+def _rebuild_traffic_estimates():
+    """Segments without a fresh reading borrow from live neighbours (inverse-distance weighted, <=450 m)."""
+    now = time.time()
+    doc, provider = _TRAFFIC_MEM["doc"], _TRAFFIC_MEM["provider"]
+    segs = _segment_index()["by_id"]
+    live = {}
+    for sid, s in segs.items():
+        r = _fresh_reading(doc, sid, provider, now)
+        if r is not None and s["type"] != "lot":
+            live[sid] = r
+    est, pressure = {}, []
+    for sid, s in segs.items():
+        if s["type"] == "lot":
+            continue
+        if sid in live:
+            typ = _simulated_traffic(s["name"], s["lat"], s["lon"], s["type"], datetime.now())["typical"]
+            pressure.append((s["lat"], s["lon"], (live[sid]["c"] - typ) / 100.0))
+            continue
+        num = den = 0.0
+        for oid, r in live.items():
+            o = segs[oid]
+            d = haversine_m(s["lat"], s["lon"], o["lat"], o["lon"])
+            if d <= 450.0:
+                w = 1.0 / (30.0 + d) ** 2
+                num += w * r["c"]
+                den += w
+        if den > 0:
+            est[sid] = num / den
+    _TRAFFIC_MEM["est"] = est
+    _TRAFFIC_MEM["pressure"] = pressure
+
+
+def segment_traffic(seg_id: str, now: datetime | None = None) -> dict:
+    """
+    Current street traffic for one parking segment:
+      congestion 0-100, source live|estimated|simulated, speed_kmh, typical (what's usual right now)
+    """
     now = now or datetime.now()
-    hour = now.hour
-    is_weekend = now.weekday() >= 5
-
-    cache_key = f"{round(lat, 4)}:{round(lon, 4)}:{hour}:{is_weekend}"
-    now_ts = time.time()
-
-    if cache_key in _BUSYNESS_CACHE:
-        ts, cached_score = _BUSYNESS_CACHE[cache_key]
-        if now_ts - ts < 300:
-            return cached_score
-
-    total_raw_impact = 0.0
-    search_radius_m = 350.0
-
-    for poi in FALLBACK_POIS:
-        dist = haversine_m(lat, lon, poi["lat"], poi["lon"])
-        if dist <= search_radius_m:
-            decay = max(0.0, 1.0 - (dist / search_radius_m))
-            weight = POI_WEIGHTS.get(poi["type"], 2)
-            hourly_factor = get_poi_hourly_factor(poi["type"], hour, is_weekend)
-            total_raw_impact += weight * hourly_factor * decay
-
-    normalized_score = min(1.0, round(total_raw_impact / 18.0, 2))
-    _BUSYNESS_CACHE[cache_key] = (now_ts, normalized_score)
-    return normalized_score
+    seg = _segment_index()["by_id"].get(seg_id)
+    name, lat, lon, ptype = ((seg["name"], seg["lat"], seg["lon"], seg["type"]) if seg
+                             else (seg_id, MAP_CENTER[0], MAP_CENTER[1], "unspecified"))
+    sim = _simulated_traffic(name, lat, lon, ptype, now)
+    out = {"congestion": round(sim["c"], 1), "typical": round(sim["typical"], 1), "source": "simulated",
+           "speed_kmh": None, "provider": None}
+    if ptype in ("lot", "unavailable"):
+        return out
+    view = _traffic_view()
+    provider = view["provider"]
+    if not provider:
+        return out
+    r = _fresh_reading(view["doc"], seg_id, provider, time.time())
+    if r is not None:
+        out.update(congestion=round(r["c"], 1), source="live", speed_kmh=r.get("s"), provider=provider)
+    elif seg_id in view["est"]:
+        out.update(congestion=round(view["est"][seg_id], 1), source="estimated", provider=provider)
+    return out
 
 
-# --------------------------------------------------------------------------
-# Contextual Factor 2: Real-Time Traffic Integration
-# --------------------------------------------------------------------------
+_MULT_CACHE = {"ts": 0.0, "v": 1.0}
 
-_TRAFFIC_CACHE = {"timestamp": 0.0, "multiplier": 1.0}
 
 def fetch_live_traffic_multiplier() -> float:
-    now_ts = time.time()
-    global _TRAFFIC_CACHE
-    if "_TRAFFIC_CACHE" not in globals():
-        _TRAFFIC_CACHE = {"timestamp": 0, "multiplier": 1.0}
-
-    if now_ts - _TRAFFIC_CACHE["timestamp"] < 180:
-        return _TRAFFIC_CACHE["multiplier"]
-
-    yandex_routing_key = os.environ.get("YANDEX_ROUTING_API_KEY", "a3c71f9f-d1d6-4319-a690-e1866877ac8e")
-    multiplier = 1.0
-
+    """
+    City-wide "busier or quieter than usual" ratio (0.8 - 1.5): live street readings vs what the
+    model expects for this hour. 1.0 when there is no live data. Logged with every parking
+    event and returned by /api/recommend.
+    """
+    now = time.time()
+    cache = _MULT_CACHE
+    if now - cache["ts"] < 60:
+        return cache["v"]
+    ratio = 1.0
     try:
-        if yandex_routing_key and yandex_routing_key != "a3c71f9f-d1d6-4319-a690-e1866877ac8e":
-            origin = f"{MAP_CENTER[0]},{MAP_CENTER[1]}"
-            destination = f"{MAP_CENTER[0] + 0.01},{MAP_CENTER[1] + 0.01}"
-            url = f"https://api.routing.yandex.net/v2/route?waypoints={origin}|{destination}&apikey={yandex_routing_key}"
-            
-            req = urllib.request.Request(url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode())
-                if "route" in data and "legs" in data["route"] and len(data["route"]["legs"]) > 0:
-                    weight_data = data["route"]["legs"][0].get("weight", {})
-                    time_normal = weight_data.get("time", {}).get("value", 1)
-                    time_traffic = weight_data.get("time_with_traffic", {}).get("value", time_normal)
-                    if time_normal > 0:
-                        ratio = time_traffic / time_normal
-                        multiplier = max(0.8, min(1.5, ratio))
-    except Exception as exc:
-        print(f"[traffic] Yandex Routing API call skipped/failed ({exc}); using simulated traffic multiplier 1.0.")
-        multiplier = 1.0
+        view = _traffic_view()
+        provider = view["provider"]
+        if provider and view["doc"]:
+            live, typ = [], []
+            dt = datetime.now()
+            for sid, s in _segment_index()["by_id"].items():
+                r = _fresh_reading(view["doc"], sid, provider, now)
+                if r is not None and s["type"] != "lot":
+                    live.append(r["c"])
+                    typ.append(_simulated_traffic(s["name"], s["lat"], s["lon"], s["type"], dt)["typical"])
+            if len(live) >= 3:
+                ratio = max(0.8, min(1.5, (sum(live) / len(live) + 15.0) / (sum(typ) / len(typ) + 15.0)))
+    except Exception:
+        ratio = 1.0
+    cache.update(ts=now, v=round(ratio, 3))
+    return cache["v"]
 
-    _TRAFFIC_CACHE["multiplier"] = multiplier
-    _TRAFFIC_CACHE["timestamp"] = now_ts
-    return multiplier
+
+# --------------------------------------------------------------------------
+# POI busyness: inventory (OpenStreetMap) + opening hours + live signals
+# --------------------------------------------------------------------------
+_DAY_IDX = {"mo": 0, "tu": 1, "we": 2, "th": 3, "fr": 4, "sa": 5, "su": 6}
+_OH_DAYS_RE = re.compile(r"^((?:[a-z]{2}(?:-[a-z]{2})?)(?:,(?:[a-z]{2}(?:-[a-z]{2})?))*)(?:\s+|$)")
+_OH_TIME_RE = re.compile(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})")
+
+
+def _expand_days(spec: str):
+    days = set()
+    for part in spec.split(","):
+        if "-" in part:
+            a, b = part.split("-")
+            if a not in _DAY_IDX or b not in _DAY_IDX:
+                return None
+            i, j = _DAY_IDX[a], _DAY_IDX[b]
+            k = i
+            while True:
+                days.add(k)
+                if k == j:
+                    break
+                k = (k + 1) % 7
+        elif part in _DAY_IDX:
+            days.add(_DAY_IDX[part])
+        else:
+            return None
+    return days
+
+
+def parse_opening_hours(text):
+    """
+    OSM opening_hours (common subset) -> 7 lists of [start_min, end_min] (end > 1440 = past midnight),
+    or None when the text is missing / uses syntax we don't understand (then the category curve is used).
+    Supported: 24/7, "Mo-Fr 09:00-18:00; Sa 10:00-14:00; Su off", several ranges, overnight ranges.
+    """
+    if not text or len(text) > 400:
+        return None
+    t = text.strip().lower()
+    if t == "24/7":
+        return [[[0, 1440]] for _ in range(7)]
+    sched = [None] * 7
+    understood = False
+    for rule in t.split(";"):
+        rule = rule.strip()
+        if not rule:
+            continue
+        days = set(range(7))
+        m = _OH_DAYS_RE.match(rule)
+        rest = rule
+        if m:
+            spec = m.group(1)
+            if any(h in spec for h in ("ph", "sh")):
+                continue                                  # public/school holiday rules: ignored
+            days = _expand_days(spec)
+            if days is None:
+                return None
+            rest = rule[m.end():].strip()
+        elif rule.startswith(("ph", "sh")):
+            continue
+        if rest in ("off", "closed"):
+            ranges = []
+        elif rest == "24/7":
+            ranges = [[0, 1440]]
+        else:
+            found = _OH_TIME_RE.findall(rest)
+            if not found:
+                return None
+            ranges = []
+            for h1, m1, h2, m2 in found:
+                a, b = int(h1) * 60 + int(m1), int(h2) * 60 + int(m2)
+                if b <= a:
+                    b += 1440
+                ranges.append([a, b])
+        for d in days:
+            sched[d] = ranges
+        understood = True
+    if not understood:
+        return None
+    return [s if s is not None else [] for s in sched]
+
+
+def oh_is_open(sched, weekday: int, minute: int):
+    if sched is None:
+        return None
+    for a, b in sched[weekday]:
+        if a <= minute < b:
+            return True
+    for a, b in sched[(weekday - 1) % 7]:
+        if b > 1440 and minute + 1440 < b:
+            return True
+    return False
+
+
+_OSM_EXTRA_WEIGHTS = {"fast_food": 2, "clinic": 2, "library": 1.5, "venue": 4, "worship": 1.5,
+                      "retail": 0.8, "fitness": 1.5}
+_AMENITY_TYPES = {
+    "restaurant": "restaurant", "food_court": "restaurant", "fast_food": "fast_food",
+    "cafe": "cafe", "ice_cream": "cafe", "bar": "bar", "pub": "bar", "nightclub": "bar",
+    "bank": "bank", "pharmacy": "pharmacy", "clinic": "clinic", "doctors": "clinic", "dentist": "clinic",
+    "hospital": "hospital", "university": "university", "college": "university",
+    "school": "school", "kindergarten": "school", "library": "library",
+    "cinema": "venue", "theatre": "venue", "arts_centre": "venue", "events_venue": "venue",
+    "conference_centre": "venue", "marketplace": "shopping_centre",
+    "townhall": "government", "courthouse": "government", "police": "government", "post_office": "government",
+    "place_of_worship": "worship", "bus_station": "bus_station",
+}
+
+
+def _osm_poi_type(t: dict):
+    a, s, tr, le = t.get("amenity"), t.get("shop"), t.get("tourism"), t.get("leisure")
+    if a in _AMENITY_TYPES:
+        return _AMENITY_TYPES[a]
+    if s:
+        if s in ("mall", "department_store"):
+            return "shopping_centre"
+        if s == "supermarket":
+            return "supermarket"
+        if s in ("convenience", "greengrocer", "bakery", "butcher", "kiosk"):
+            return "convenience"
+        return "retail"
+    if tr in ("museum", "gallery"):
+        return "museum"
+    if tr in ("attraction", "zoo", "theme_park"):
+        return "tourist_attraction"
+    if tr in ("hotel", "hostel", "guest_house"):
+        return "hotel"
+    if le == "park":
+        return "park"
+    if le in ("fitness_centre", "sports_centre", "stadium"):
+        return "fitness"
+    if t.get("railway") == "subway_entrance" or t.get("public_transport") == "station":
+        return "metro_station"
+    if t.get("office"):
+        return "office"
+    return None
+
+
+def _poi_weight(ptype: str) -> float:
+    return float(_OSM_EXTRA_WEIGHTS.get(ptype, POI_WEIGHTS.get(ptype, 2)))
+
+
+def _pois_from_overpass(elements):
+    pois = []
+    for el in elements:
+        tags = el.get("tags") or {}
+        ptype = _osm_poi_type(tags)
+        if not ptype:
+            continue
+        lat = el.get("lat", (el.get("center") or {}).get("lat"))
+        lon = el.get("lon", (el.get("center") or {}).get("lon"))
+        if lat is None or lon is None:
+            continue
+        w = _poi_weight(ptype)
+        if tags.get("wikidata") or tags.get("wikipedia"):
+            w *= 1.4                       # notable places draw more people
+        elif tags.get("brand"):
+            w *= 1.1
+        pois.append({"lat": round(lat, 5), "lon": round(lon, 5), "t": ptype, "n": tags.get("name", ""),
+                     "w": round(w, 2), "oh": parse_opening_hours(tags.get("opening_hours"))})
+    return pois[:15000]
+
+
+def _overpass_query() -> str:
+    pts = [p for s in _segment_index()["by_id"].values() for p in s["points"]] or [(MAP_CENTER[0], MAP_CENTER[1])]
+    south, north = min(p[0] for p in pts) - 0.006, max(p[0] for p in pts) + 0.006
+    west, east = min(p[1] for p in pts) - 0.008, max(p[1] for p in pts) + 0.008
+    bb = f"{south:.5f},{west:.5f},{north:.5f},{east:.5f}"
+    amen = "|".join(sorted(_AMENITY_TYPES))
+    return (f'[out:json][timeout:50];('
+            f'nwr["amenity"~"^({amen})$"]({bb});'
+            f'nwr["shop"]({bb});'
+            f'nwr["tourism"~"^(museum|gallery|attraction|hotel|hostel|guest_house|zoo|theme_park)$"]({bb});'
+            f'nwr["leisure"~"^(park|fitness_centre|sports_centre|stadium)$"]({bb});'
+            f'nwr["railway"="subway_entrance"]({bb});nwr["public_transport"="station"]({bb});'
+            f'nwr["office"]({bb});'
+            f');out center tags qt;')
+
+
+def _refresh_pois():
+    """Downloads the POI inventory from OpenStreetMap (Overpass) and stores it for every worker."""
+    urls = [u for u in (os.environ.get("OVERPASS_URL", "").strip(),
+                        "https://overpass-api.de/api/interpreter",
+                        "https://overpass.kumi.systems/api/interpreter") if u]
+    body = urllib.parse.urlencode({"data": _overpass_query()}).encode()
+    last = None
+    for url in urls:
+        try:
+            data = _http_json(url, timeout=70, method="POST", data=body,
+                              headers={"Content-Type": "application/x-www-form-urlencoded"})
+            pois = _pois_from_overpass(data.get("elements", []))
+            if len(pois) < 20:
+                raise RuntimeError(f"only {len(pois)} usable POIs returned")
+            _ld_put("poi:inventory", {"fetched_at": time.time(), "source": "osm", "pois": pois})
+            print(f"[poi] stored {len(pois)} OpenStreetMap POIs ({sum(1 for p in pois if p['oh'])} with opening hours)")
+            return len(pois)
+        except Exception as exc:
+            last = exc
+            print(f"[poi] Overpass fetch failed on {url.split('/')[2]} ({_redact(exc)})")
+    raise RuntimeError(f"all Overpass endpoints failed: {_redact(last)}")
+
+
+_POI_MEM = {"checked": 0.0, "fetched_at": None, "pois": [], "grid": {}, "source": "curated", "ref": None}
+_POI_TTL_S = 7 * 24 * 3600
+_GRID_DLAT, _GRID_DLON = 0.004, 0.005          # cells >= the 350 m search radius in both axes
+
+
+def _install_inventory(pois, source, fetched_at):
+    grid: dict = {}
+    for p in pois:
+        grid.setdefault((int(p["lat"] / _GRID_DLAT), int(p["lon"] / _GRID_DLON)), []).append(p)
+    _POI_MEM.update(pois=pois, grid=grid, source=source, fetched_at=fetched_at, ref=None)
+    _BUSYNESS_CACHE.clear()
+
+
+def _poi_state():
+    now = time.time()
+    st = _POI_MEM
+    if st["pois"] and now - st["checked"] < 600:
+        return st
+    st["checked"] = now
+    if os.environ.get("POI_SOURCE", "auto").strip().lower() != "curated":
+        try:
+            doc, _ = _ld_get("poi:inventory")
+            if doc and doc.get("pois"):
+                if st["fetched_at"] != doc.get("fetched_at"):
+                    _install_inventory(doc["pois"], "osm", doc.get("fetched_at"))
+                if now - float(doc.get("fetched_at", 0)) > _POI_TTL_S and _ld_claim("poi:refresh", 3600):
+                    _run_in_background(_refresh_pois)
+            elif _ld_claim("poi:refresh", 3600):
+                _run_in_background(_refresh_pois)
+        except Exception as exc:
+            print(f"[poi] inventory read failed ({_redact(exc)})")
+    if not st["pois"]:
+        curated = [{"lat": p["lat"], "lon": p["lon"], "t": p["type"], "n": p["name"],
+                    "w": float(POI_WEIGHTS.get(p["type"], 2)), "oh": None} for p in FALLBACK_POIS]
+        _install_inventory(curated, "curated", 0)
+    return st
+
+
+def _poi_demand(ptype: str, hour: int, weekday: int) -> float:
+    """How busy this kind of place is at this hour/weekday (0-1), before opening hours are applied."""
+    weekend = weekday >= 5
+    if ptype == "fast_food":
+        d = 0.35 + 0.65 * get_poi_hourly_factor("restaurant", hour, weekend)
+    elif ptype == "clinic":
+        d = 0.9 if (weekday < 5 and 8 <= hour <= 18) else (0.5 if (weekday == 5 and 9 <= hour <= 14) else 0.04)
+    elif ptype == "library":
+        d = 0.75 if 10 <= hour <= 20 else 0.05
+    elif ptype == "venue":
+        d = 1.0 if 19 <= hour <= 22 else (0.35 if 12 <= hour <= 18 else 0.05)
+        if weekday in (4, 5) and 19 <= hour <= 23:
+            d = min(1.0, d * 1.2)
+    elif ptype == "worship":
+        d = 1.0 if (weekday == 6 and 10 <= hour <= 13) else (0.3 if 17 <= hour <= 19 else 0.12)
+    elif ptype == "retail":
+        if weekend:
+            d = 1.0 if 12 <= hour <= 19 else (0.55 if 10 <= hour <= 21 else 0.05)
+        else:
+            d = 0.9 if 17 <= hour <= 19 else (0.6 if 10 <= hour <= 21 else 0.05)
+    elif ptype == "fitness":
+        d = 1.0 if 17 <= hour <= 21 else (0.7 if 7 <= hour <= 9 else (0.3 if 10 <= hour <= 16 else 0.03))
+    else:
+        d = get_poi_hourly_factor(ptype, hour, weekend)
+    if ptype in ("restaurant", "bar", "cafe", "fast_food") and weekday in (4, 5) and 18 <= hour <= 23:
+        d = min(1.0, d * 1.15)                           # Friday / Saturday evenings
+    return d
+
+
+def _raw_poi_impact(st, lat, lon, hour, weekday, minute, radius=350.0):
+    ci, cj = int(lat / _GRID_DLAT), int(lon / _GRID_DLON)
+    total = 0.0
+    for di in (-1, 0, 1):
+        for dj in (-1, 0, 1):
+            for p in st["grid"].get((ci + di, cj + dj), ()):
+                d = haversine_m(lat, lon, p["lat"], p["lon"])
+                if d > radius:
+                    continue
+                demand = _poi_demand(p["t"], hour, weekday)
+                if p["oh"] is not None:
+                    is_open = oh_is_open(p["oh"], weekday, minute)
+                    if is_open is False:
+                        demand = min(demand, 0.04)       # known to be closed right now
+                total += p["w"] * demand * (1.0 - d / radius)
+    return total
+
+
+def _poi_reference(st) -> float:
+    """
+    Divisor that turns raw POI impact into a 0-1 busyness. The curated list used a fixed 18.
+    A full OpenStreetMap inventory has far more POIs, so the scale is calibrated from the data:
+    the 85th-percentile impact over all parking segments at the weekday lunch / dinner peaks.
+    """
+    if st["ref"] is not None:
+        return st["ref"]
+    if st["source"] == "curated":
+        st["ref"] = 18.0
+        return st["ref"]
+    vals = []
+    for s in list(_segment_index()["by_id"].values())[:200]:
+        for hour in (13, 19):
+            vals.append(_raw_poi_impact(st, s["lat"], s["lon"], hour, 2, hour * 60))
+    vals.sort()
+    p85 = vals[int(0.85 * (len(vals) - 1))] if vals else 0.0
+    st["ref"] = max(p85 * 1.15, 6.0)
+    return st["ref"]
+
+
+def _local_traffic_pressure(lat, lon):
+    """Average (live - usual) congestion of live street readings within 350 m, as -1..1; None if there are none."""
+    try:
+        pts = _traffic_view()["pressure"]
+    except Exception:
+        return None
+    num = den = 0.0
+    for la, lo, delta in pts:
+        d = haversine_m(lat, lon, la, lo)
+        if d <= 350.0:
+            w = 1.0 - d / 350.0
+            num += w * delta
+            den += w
+    return (num / den) if den > 0 else None
+
+
+# ---- optional: BestTime.app live busyness ("busier than usual") ---------------------
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]
+
+
+def _fetch_besttime(venue_name: str):
+    key = os.environ.get("BESTTIME_API_KEY", "").strip()
+    if not key or not _budget_take("besttime"):
+        return
+    url = "https://besttime.app/api/v1/forecasts/live?" + urllib.parse.urlencode({
+        "api_key_private": key, "venue_name": venue_name, "venue_address": f"{venue_name}, Yerevan, Armenia"})
+    data = _http_json(url, method="POST", data=b"", timeout=15)
+    an = data.get("analysis") or {}
+    ratio = None
+    if an.get("venue_live_busyness_available"):
+        live, fc = an.get("venue_live_busyness"), an.get("venue_forecasted_busyness")
+        if live is not None and fc is not None:
+            ratio = (float(live) + 10.0) / (float(fc) + 10.0)       # smoothed live / forecast
+    _ld_put(f"bt:{_slug(venue_name)}", {"ratio": ratio, "live": an.get("venue_live_busyness"),
+                                        "forecast": an.get("venue_forecasted_busyness")})
+
+
+def _besttime_ratio_near(lat, lon):
+    if not os.environ.get("BESTTIME_API_KEY", "").strip():
+        return None
+    best, best_d = None, 150.0
+    for p in FALLBACK_POIS:                            # tracked venues: the curated landmarks
+        if POI_WEIGHTS.get(p["type"], 2) < 4:
+            continue
+        d = haversine_m(lat, lon, p["lat"], p["lon"])
+        if d < best_d:
+            best, best_d = p, d
+    if not best:
+        return None
+    key = f"bt:{_slug(best['name'])}"
+    doc, ts = _ld_get(key)
+    if time.time() - ts > 2700 and _ld_claim(key + ":claim", 1800):
+        _run_in_background(_fetch_besttime, best["name"])
+    if doc and doc.get("ratio") is not None and time.time() - ts < 4 * 3600:
+        return float(doc["ratio"])
+    return None
+
+
+def calculate_destination_busyness(lat: float, lon: float, now: datetime | None = None) -> float:
+    """
+    How busy the area around a point is (0 = quiet, 1 = packed), from:
+      1. every POI within 350 m, weighted by type and distance, scaled by how busy that kind of
+         place is at this hour/weekday, and zeroed for places that are closed right now
+      2. live pressure: are the surrounding streets slower than usual?  (when live traffic is on)
+      3. live venue busyness vs forecast for nearby landmarks               (when BestTime is on)
+    """
+    now = now or datetime.now()
+    key = (round(lat, 4), round(lon, 4), now.weekday(), now.hour * 6 + now.minute // 10)
+    now_ts = time.time()
+    hit = _BUSYNESS_CACHE.get(key)
+    if hit and now_ts - hit[0] < 300:
+        return hit[1]
+
+    st = _poi_state()
+    impact = _raw_poi_impact(st, lat, lon, now.hour, now.weekday(), now.hour * 60 + now.minute)
+    score = min(1.0, impact / _poi_reference(st))
+
+    pressure = _local_traffic_pressure(lat, lon)
+    if pressure is not None:
+        score += max(-0.15, min(0.25, 0.4 * pressure))
+    ratio = _besttime_ratio_near(lat, lon)
+    if ratio is not None:
+        score *= max(0.6, min(1.5, ratio))
+
+    score = round(max(0.0, min(1.0, score)), 2)
+    if len(_BUSYNESS_CACHE) > 4000:
+        _BUSYNESS_CACHE.clear()
+    _BUSYNESS_CACHE[key] = (now_ts, score)
+    return score
 
 
 # --------------------------------------------------------------------------
@@ -1075,33 +2049,42 @@ def _hour_congestion_curve(hour: int, is_weekend: bool) -> float:
     return curve.get(hour, 0.3)
 
 def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | None = None) -> dict:
+    """
+    One parking segment's current state.
+
+      congestion_score / traffic_level   how slow the STREET is: a live provider reading when
+                                         available, otherwise the per-street simulation
+      availability_pct / occupancy_status  how likely a free space is: driven by the demand of the
+                                         POIs around THIS segment (open places only), the time of
+                                         day, the street's traffic and the kind of parking
+
+    These used to be one number (traffic = 100 - availability); they are independent now.
+    """
     if parking_type == "unavailable":
         return {
             "availability_pct": 0.0,
             "congestion_score": 0.0,
             "occupancy_status": "Unavailable",
             "traffic_level": "N/A",
+            "traffic_source": "n/a",
+            "speed_kmh": None,
         }
 
     now = now or datetime.now()
-    is_weekend = now.weekday() >= 5
-    base = _hour_congestion_curve(now.hour, is_weekend)
-    next_hour_base = _hour_congestion_curve((now.hour + 1) % 24, is_weekend)
-    frac = now.minute / 60.0
-    congestion_factor = base + (next_hour_base - base) * frac
+    seg = _segment_index()["by_id"].get(segment_id)
+    lat, lon = (seg["lat"], seg["lon"]) if seg else (MAP_CENTER[0], MAP_CENTER[1])
 
-    seed_key = f"{segment_id}-{now.strftime('%Y%m%d%H%M')}"
-    rng = random.Random(seed_key)
-    jitter = rng.uniform(-9, 9)
+    traffic = segment_traffic(segment_id, now)
+    congestion = traffic["congestion"]
+    demand = calculate_destination_busyness(lat, lon, now)
+    city = _curve_at(now.hour * 60 + now.minute, now.weekday() >= 5)
 
-    availability_pct = 100 - (congestion_factor * 100) + jitter
+    occupancy = 0.14 + 0.46 * demand + 0.22 * city + 0.10 * (congestion / 100.0)
+    occupancy += {"free": 0.06, "paid": -0.06, "lot": -0.10}.get(parking_type, 0.0)
+    rnd = random.Random("avail|" + str(segment_id))          # slow, per-segment drift (no per-minute flicker)
+    occupancy += 0.05 * math.sin(2 * math.pi * (now.timestamp() / 60.0 / rnd.uniform(35, 70) + rnd.random()))
 
-    type_adjust = {"free": -6, "paid": 6, "lot": 12, "unspecified": -2}
-    availability_pct += type_adjust.get(parking_type, 0)
-    availability_pct = max(3.0, min(97.0, availability_pct))
-
-    congestion_score = round(100 - availability_pct, 1)
-
+    availability_pct = max(3.0, min(97.0, 100.0 * (1.0 - occupancy)))
     if availability_pct >= 60:
         occupancy_status = "Available"
     elif availability_pct >= 28:
@@ -1109,18 +2092,20 @@ def simulate_segment_state(segment_id: str, parking_type: str, now: datetime | N
     else:
         occupancy_status = "Occupied"
 
-    if congestion_score < 35:
+    if congestion < 35:
         traffic_level = "Low"
-    elif congestion_score < 65:
+    elif congestion < 65:
         traffic_level = "Medium"
     else:
         traffic_level = "Heavy"
 
     return {
         "availability_pct": round(availability_pct, 1),
-        "congestion_score": congestion_score,
+        "congestion_score": round(congestion, 1),
         "occupancy_status": occupancy_status,
         "traffic_level": traffic_level,
+        "traffic_source": traffic["source"],
+        "speed_kmh": traffic["speed_kmh"],
     }
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1191,7 +2176,18 @@ def pwa_manifest():
         "short_name": "parkaway",
         "categories": ["navigation", "travel"],
         "description": "Live-simulated curb & lot availability across central Yerevan.",
+        "id": "/",
         "start_url": "/",
+        "scope": "/",
+        "lang": "en",
+        "orientation": "portrait",
+        # Long-press the home-screen icon -> jump straight to the one thing people open the app for
+        "shortcuts": [
+            {"name": "Find parking", "short_name": "Where to?", "url": "/?a=search",
+             "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}]},
+            {"name": "Live traffic", "short_name": "Traffic", "url": "/?a=traffic",
+             "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml"}]},
+        ],
         "display": "standalone",
         "background_color": "#E9BB95",
         "theme_color": "#14151a",
@@ -1207,7 +2203,7 @@ def service_worker():
     js = """
     // Bump this on every deploy that changes app behavior. Changing the name
     // makes old caches orphaned so they get cleaned up in 'activate' below.
-    const CACHE_NAME = 'yerevan-parking-v5';
+    const CACHE_NAME = 'yerevan-parking-v6';
     const STATIC_ASSETS = [
         'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap',
         'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
@@ -1443,46 +2439,65 @@ def api_parking():
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
+def _traffic_level(score: float) -> str:
+    return "Low" if score < 35 else ("Medium" if score < 65 else "Heavy")
+
+
 @app.route("/api/traffic")
 def api_traffic():
     now = datetime.now()
-    by_street: dict[str, list[dict]] = {}
-
-    for f in PARKING_FEATURES:
-        if f["parking_type"] == "unavailable":
-            continue
-        state = simulate_segment_state(f["id"], f["parking_type"], now)
-        by_street.setdefault(f["name"], []).append(state)
+    segs = [s for s in _segment_index()["by_id"].values() if s["type"] != "unavailable"]
+    streets = [s for s in segs if s["type"] != "lot"] or segs          # parking lots aren't streets
+    by_street: dict[str, list[tuple[dict, dict]]] = {}
+    for s in streets:
+        by_street.setdefault(s["name"], []).append(
+            (simulate_segment_state(s["id"], s["type"], now), segment_traffic(s["id"], now)))
 
     rows = []
-    for name, states in by_street.items():
-        avg_congestion = sum(s["congestion_score"] for s in states) / len(states)
-        avg_availability = sum(s["availability_pct"] for s in states) / len(states)
-        if avg_congestion < 35:
-            level = "Low"
-        elif avg_congestion < 65:
-            level = "Medium"
-        else:
-            level = "Heavy"
+    for name, items in by_street.items():
+        cong = sum(t["congestion"] for _, t in items) / len(items)
+        avail = sum(st["availability_pct"] for st, _ in items) / len(items)
+        typical = sum(t["typical"] for _, t in items) / len(items)
+        sources = {t["source"] for _, t in items}
+        source = "live" if "live" in sources else ("estimated" if "estimated" in sources else "simulated")
+        speeds = [t["speed_kmh"] for _, t in items if t["speed_kmh"] is not None]
+        delta = cong - typical
         rows.append({
             "name": name,
-            "traffic_level": level,
-            "congestion_score": round(avg_congestion, 1),
-            "availability_pct": round(avg_availability, 1),
+            "traffic_level": _traffic_level(cong),
+            "congestion_score": round(cong, 1),
+            "availability_pct": round(avail, 1),
+            "source": source,
+            "speed_kmh": round(sum(speeds) / len(speeds), 1) if speeds else None,
+            # "busier than usual" at street level (only meaningful with real readings)
+            "vs_typical": round(delta, 1) if source != "simulated" else None,
+            "usual": (None if source == "simulated" else
+                      ("busier than usual" if delta >= 12 else ("quieter than usual" if delta <= -12 else "as usual"))),
         })
-
     rows.sort(key=lambda r: r["congestion_score"], reverse=True)
 
     overall_avg = sum(r["congestion_score"] for r in rows) / len(rows) if rows else 0
-    overall_level = "Low" if overall_avg < 35 else ("Medium" if overall_avg < 65 else "Heavy")
+    live_n = sum(1 for r in rows if r["source"] == "live")
+    est_n = sum(1 for r in rows if r["source"] == "estimated")
+    provider = _traffic_view()["provider"]
 
-    return jsonify({
+    resp = jsonify({
         "generated_at": now.isoformat(),
-        "overall_level": overall_level,
+        "overall_level": _traffic_level(overall_avg),
         "overall_congestion_score": round(overall_avg, 1),
         "overall_traffic_score": max(0, min(10, int(round(overall_avg / 10)))),
+        "data_source": {
+            "provider": provider,                       # None = simulated
+            "mode": "live" if live_n else ("warming_up" if provider else "simulated"),
+            "live_streets": live_n,
+            "estimated_streets": est_n,
+            "total_streets": len(rows),
+        },
         "streets": rows,
     })
+    resp.headers["Cache-Control"] = "private, max-age=10"
+    return resp
+
 
 def _get_live_features() -> list[dict]:
     """
@@ -1550,10 +2565,12 @@ def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_
             state = simulate_segment_state(segment_id, parking_type, now)
             dest_busyness = calculate_destination_busyness(lat, lon, now)
 
-            adjusted_congestion = min(100.0, state["congestion_score"] * traffic_mult)
+            # real/estimated street readings already ARE the current traffic; only the simulation is scaled by the city ratio
+            adjusted_congestion = (state["congestion_score"] if state.get("traffic_source") in ("live", "estimated")
+                                   else min(100.0, state["congestion_score"] * traffic_mult))
             traffic_factor = round(adjusted_congestion / 100.0, 2)
 
-            adjusted_avail = max(3.0, min(97.0, state["availability_pct"] - (dest_busyness * 20.0) - (weather_factor * 6.0)))
+            adjusted_avail = max(3.0, min(97.0, state["availability_pct"] - (dest_busyness * 8.0) - (weather_factor * 6.0)))
 
             busyness_component = (1.0 - dest_busyness) * 25.0
             avail_component = (adjusted_avail / 100.0) * 20.0
@@ -1591,6 +2608,7 @@ def _compute_recommendations(dest_lat, dest_lon, requested_radius, now, traffic_
                 "congestion_score": round(adjusted_congestion, 1),
                 "occupancy_status": occ_status,
                 "traffic_level": state["traffic_level"],
+                "traffic_source": state.get("traffic_source"),
                 "destination_busyness": dest_busyness,
                 "destination_busyness_level": busyness_level,
                 "traffic_factor": traffic_factor,
@@ -2250,6 +3268,183 @@ def api_trip_undo():
         det.undone = True
         db.session.commit()
     return jsonify({"status": "ok"})
+
+
+# --------------------------------------------------------------------------
+# Home-screen data: live parking outlook per place, and "where am I" street
+# --------------------------------------------------------------------------
+# The home screen shows one-tap shortcut cards ("Opera Theatre - Easy parking").
+# This is the same scoring engine as /api/recommend, summarised to a single
+# word per place so a visitor gets value before typing anything, and has a
+# reason to come back later ("is it easy to park near Cascade right now?").
+_OUTLOOK_CACHE: dict = {}
+_OUTLOOK_TTL_S = 30.0
+_OUTLOOK_MAX_POINTS = 10
+
+
+def _outlook_level(best_score: float) -> str:
+    """
+    Top recommendation score -> how hard parking is right now. Best-spot scores for the
+    landmarks range ~45-94 over a day/week, so the cut-offs split that range into
+    roughly thirds; that keeps the cards informative (they differ by place and by hour)
+    instead of reading "busy" all day.
+    """
+    if best_score >= 75:
+        return "easy"
+    if best_score >= 62:
+        return "moderate"
+    return "tough"
+
+
+def _outlook_for_point(lat, lon, now, traffic_mult, weather):
+    key = (round(lat, 4), round(lon, 4))
+    stamp = time.time()
+    hit = _OUTLOOK_CACHE.get(key)
+    if hit and stamp - hit[0] < _OUTLOOK_TTL_S:
+        return hit[1]
+
+    candidates, _ = _compute_recommendations(lat, lon, 500.0, now, traffic_mult, weather)
+    if candidates:
+        best = candidates[0]
+        out = {
+            "level": _outlook_level(best["final_score"]),
+            "score": best["final_score"],
+            "walk_min": best["walk_time_min"],
+            "spot": best["name"],
+            "availability_pct": best["availability_pct"],
+            "spots": len(candidates),
+        }
+    else:
+        out = {"level": "unknown", "score": None, "walk_min": None, "spot": None,
+               "availability_pct": None, "spots": 0}
+
+    if len(_OUTLOOK_CACHE) > 500:
+        _OUTLOOK_CACHE.clear()
+    _OUTLOOK_CACHE[key] = (stamp, out)
+    return out
+
+
+@app.route("/api/outlook")
+def api_outlook():
+    """?pts=lat,lon|lat,lon|...  ->  one outlook per point that lies inside the service area."""
+    points = []
+    for chunk in request.args.get("pts", "").split("|")[:_OUTLOOK_MAX_POINTS]:
+        try:
+            lat_s, lon_s = chunk.split(",")
+            lat, lon = float(lat_s), float(lon_s)
+        except ValueError:
+            continue
+        if math.isfinite(lat) and math.isfinite(lon) and _in_service_area(lat, lon):
+            points.append((lat, lon))
+    if not points:
+        return jsonify({"places": []})
+
+    now = datetime.now()
+    traffic_mult = fetch_live_traffic_multiplier()
+    weather = fetch_live_weather()
+    places = []
+    for lat, lon in points:
+        places.append({"lat": lat, "lon": lon, **_outlook_for_point(lat, lon, now, traffic_mult, weather)})
+
+    resp = jsonify({"generated_at": now.isoformat(), "places": places})
+    resp.headers["Cache-Control"] = "private, max-age=20"
+    return resp
+
+
+@app.route("/api/where")
+def api_where():
+    """Nearest named street to a point (for the 'Your location' chip and dropped pins)."""
+    lat, lon = _opt_float(request.args.get("lat")), _opt_float(request.args.get("lon"))
+    if lat is None or lon is None:
+        return jsonify({"error": "lat and lon are required."}), 400
+
+    best, best_d = None, float("inf")
+    for f in _get_live_features():
+        f_lat, f_lon = _extract_lat_lon(f)
+        d = haversine_m(lat, lon, f_lat, f_lon)
+        if d < best_d:
+            best, best_d = f, d
+    name = best.get("name") if best else None
+    street = name if isinstance(name, str) and name.strip() and best_d <= 150 else None
+
+    resp = jsonify({
+        "street": street,
+        "distance_m": round(best_d) if best else None,
+        "in_service_area": _in_service_area(lat, lon),
+    })
+    resp.headers["Cache-Control"] = "private, max-age=30"
+    return resp
+
+
+@app.route("/api/admin/data-sources")
+@require_admin
+def api_admin_data_sources():
+    """
+    Admin-only health check for the live-data layer. ?probe=1 makes one real request to the
+    active traffic provider and reports exactly what came back (use it right after setting a
+    key: it answers "does this provider actually cover Yerevan?"). ?refresh_pois=1 re-downloads
+    the OpenStreetMap POI inventory in the background.
+    """
+    keys = _provider_keys()
+    provider = _active_traffic_provider()
+    status, _ = _ld_get("traffic:status")
+    doc, doc_ts = _ld_get("traffic:live")
+    segs = [s for s in _segment_index()["by_id"].values() if s["type"] not in ("unavailable", "lot")]
+    out = {
+        "traffic": {
+            "configured": {k: bool(v) for k, v in keys.items()},
+            "preference": os.environ.get("TRAFFIC_PROVIDER", "auto"),
+            "active_provider": provider,
+            "status": status or {},
+            "readings": len((doc or {}).get("readings", {})) if doc else 0,
+            "segments": len(segs),
+            "last_fetch_age_s": round(time.time() - doc_ts) if doc_ts else None,
+            "budgets": {p: {"limit": _budget_limit(p)[0],
+                            "used": int(_ld_get(f"budget:{p}:{datetime.utcnow().strftime(_budget_limit(p)[1])}")[0] or 0)}
+                        for p in ("here", "tomtom", "yandex", "besttime")},
+        },
+    }
+
+    if request.args.get("probe") == "1":
+        probe = {"provider": provider}
+        if not provider:
+            probe["error"] = "No traffic provider is configured (set HERE_API_KEY, TOMTOM_API_KEY or YANDEX_ROUTING_API_KEY)."
+        else:
+            t0 = time.time()
+            try:
+                if provider == "here":
+                    r = _here_readings(segs)
+                    probe["matched_segments"] = len(r)
+                    probe["sample"] = dict(list(r.items())[:3])
+                else:
+                    seg = min(segs, key=lambda s: haversine_m(MAP_CENTER[0], MAP_CENTER[1], s["lat"], s["lon"]))
+                    probe["segment"] = seg["name"]
+                    probe["sample"] = _PROBES[provider](seg)
+                probe["ok"] = bool(probe.get("sample"))
+                if not probe["ok"]:
+                    probe["note"] = "The call worked but returned no usable traffic for this area (no coverage, or road too short)."
+            except Exception as exc:
+                probe["ok"] = False
+                probe["error"] = _redact(exc)
+            probe["latency_ms"] = round((time.time() - t0) * 1000)
+        out["probe"] = probe
+
+    if request.args.get("refresh_pois") == "1":
+        _run_in_background(_refresh_pois)
+        out["poi_refresh"] = "started"
+    st = _poi_state()
+    by_type: dict = {}
+    for p in st["pois"]:
+        by_type[p["t"]] = by_type.get(p["t"], 0) + 1
+    out["poi"] = {
+        "source": st["source"],
+        "count": len(st["pois"]),
+        "with_opening_hours": sum(1 for p in st["pois"] if p.get("oh")),
+        "age_h": round((time.time() - st["fetched_at"]) / 3600, 1) if st["fetched_at"] else None,
+        "by_type": dict(sorted(by_type.items(), key=lambda kv: -kv[1])[:12]),
+        "besttime_configured": bool(os.environ.get("BESTTIME_API_KEY", "").strip()),
+    }
+    return jsonify(out)
 
 
 if __name__ == "__main__":

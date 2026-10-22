@@ -204,6 +204,7 @@
     flex-shrink: 0;
   }
   #locate-btn.busy .ico { animation: spin 1s linear infinite; }
+  body.admin-on .sheet-float { left: calc(58px + var(--safe-left)); }     /* room for the admin toolbar column */
 
   .chip {
     height: 44px;
@@ -222,78 +223,46 @@
 
   /* ================= Location prompts ================= */
   :root { --banner-h: 0px; }
-  body.loc-banner { --banner-h: calc(80px + var(--safe-bottom)); }
-  /* the sheet rises above the message so nothing is covered */
+  body.loc-banner { --banner-h: calc(52px + var(--safe-bottom)); }
+  /* the sheet rises above the bar so nothing is covered */
   #sidebar { bottom: max(var(--kb, 0px), var(--banner-h)); }
-  body.loc-banner #sidebar { padding-bottom: 6px; }
+  body.loc-banner #sidebar { padding-bottom: 4px; }
 
+  /* A slim strip, not a block: visible and one tap from fixed, but it never dominates the screen. */
   #loc-banner {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 920;
     height: var(--banner-h);
-    padding: 12px 14px var(--safe-bottom);
+    padding: 7px 12px var(--safe-bottom);
     background: var(--apricot); color: var(--basalt-950);
-    display: flex; align-items: center; gap: 12px;
-    box-shadow: 0 -4px 20px rgba(0,0,0,.35);
+    display: flex; align-items: center; gap: 10px;
+    box-shadow: 0 -2px 10px rgba(0,0,0,.28);
     transform: translateY(110%);
     transition: transform .45s var(--ease);
   }
   body.loc-banner #loc-banner { transform: none; }
   .loc-banner-ico {
-    width: 40px; height: 40px; border-radius: 14px; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 10px; flex-shrink: 0;
     background: var(--basalt-950); color: var(--apricot);
     display: flex; align-items: center; justify-content: center;
   }
-  body.loc-banner .loc-banner-ico { animation: ping 2s ease-out infinite; }
-  .loc-banner-text { flex: 1; min-width: 0; line-height: 1.25; }
-  .loc-banner-text b { display: block; font-size: 16px; font-weight: 700; }
-  .loc-banner-text span { display: block; font-size: 12.5px; font-weight: 500; opacity: .82; margin-top: 2px; }
+  .loc-banner-ico .ico { --ico-size: 17px; width: 17px; height: 17px; }
+  .loc-banner-text { flex: 1; min-width: 0; line-height: 1.2; }
+  .loc-banner-text b { display: block; font-size: 14px; font-weight: 700; }
+  .loc-banner-text span { display: block; font-size: 11.5px; font-weight: 500; opacity: .8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #loc-banner-cta {
-    border: none; border-radius: 14px; padding: 12px 16px; flex-shrink: 0;
+    border: none; border-radius: 11px; padding: 8px 14px; flex-shrink: 0;
     background: var(--basalt-950); color: var(--apricot);
-    font-size: 14px; font-weight: 700; cursor: pointer;
+    font-size: 13px; font-weight: 700; cursor: pointer;
   }
 
   /* the arrow button and the address header say "off" until it is fixed */
-  #locate-btn.off { background: var(--apricot); color: var(--basalt-950); animation: ringBtn 2s ease-out infinite; }
+  #locate-btn.off { box-shadow: 0 0 0 1.5px rgba(245,165,54,.65), 0 4px 16px rgba(0,0,0,.4); animation: ringBtn 3s ease-out infinite; }
   #loc-chip.off .loc-label { color: var(--apricot); font-weight: 700; }
   #loc-chip.off .loc-label::before {
     content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
     background: var(--apricot); margin-right: 6px; vertical-align: 1px;
     animation: pulseDot 1.6s ease-out infinite;
   }
-
-  /* first-open screen */
-  #loc-gate {
-    position: fixed; inset: 0; z-index: 935;
-    background: rgba(10,11,14,.78);
-    display: flex; align-items: flex-end; justify-content: center;
-    padding: 0 12px calc(12px + var(--safe-bottom));
-    animation: fadeIn .35s both;
-  }
-  .gate-card {
-    width: min(100%, 440px);
-    background: var(--basalt-900); border-radius: 28px;
-    padding: 22px 20px 18px;
-    text-align: center;
-    box-shadow: 0 -8px 40px rgba(0,0,0,.5);
-    animation: riseIn .55s var(--ease) .1s both;
-  }
-  .gate-logo { width: 54px; height: 54px; border-radius: 16px; display: block; margin: 0 auto 12px; }
-  .gate-card h2 { margin: 0; font-size: 24px; line-height: 1.15; font-weight: 700; }
-  .gate-sub { margin: 8px 0 14px; font-size: 14px; color: var(--fog); line-height: 1.45; }
-  .gate-list { list-style: none; margin: 0 0 14px; padding: 0; text-align: left; }
-  .gate-list li { display: flex; align-items: center; gap: 12px; padding: 7px 0; font-size: 14px; line-height: 1.35; color: var(--fog); }
-  .gate-list li b { color: var(--paper); font-weight: 600; }
-  .g-ico { width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0; background-size: 100% 100%; }
-  .gate-tip { font-size: 13px; color: var(--apricot); background: rgba(245,165,54,.1); border-radius: 12px; padding: 9px 12px; margin-bottom: 12px; line-height: 1.4; }
-  .gate-tip b { color: var(--paper); }
-  .gate-cta {
-    width: 100%; border: none; border-radius: 18px; padding: 16px;
-    background: var(--apricot); color: var(--basalt-950);
-    font-size: 17px; font-weight: 700; cursor: pointer;
-  }
-  .gate-cta:disabled { opacity: .7; cursor: default; }
-  .gate-privacy { margin-top: 10px; font-size: 12px; color: var(--fog); }
 
   /* "show me how" sheet */
   #loc-steps-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 941; opacity: 0; pointer-events: none; transition: opacity .3s; }
@@ -306,6 +275,12 @@
     max-height: 85dvh; overflow-y: auto;
   }
   #loc-steps.open { transform: none; }
+  .steps-cta {
+    display: block; width: calc(100% - 36px); margin: 6px 18px 0;
+    border: none; border-radius: 16px; padding: 15px;
+    background: var(--apricot); color: var(--basalt-950);
+    font-size: 16px; font-weight: 700; cursor: pointer;
+  }
   .steps-sub { margin: 0 18px 8px; font-size: 13px; color: var(--fog); }
   #loc-steps-list { margin: 4px 18px 12px; padding-left: 22px; font-size: 15px; line-height: 1.5; color: var(--paper); }
   #loc-steps-list li { padding: 5px 0 5px 4px; }
@@ -691,8 +666,14 @@
 
   /* Zoom buttons only where there is no pinch-zoom */
   .leaflet-control-container .leaflet-bottom.leaflet-right {
-    bottom: auto; top: 40%;
+    bottom: auto;
+    top: clamp(132px, 40%, calc(100% - 440px));       /* never lower than the sheet allows on a short screen */
     right: calc(14px + var(--safe-right));
+    transition: top .25s;
+  }
+  @media (max-width: 768px) {
+    /* phone layout: the sheet is tall in these modes, so the zoom buttons move up under the legend button */
+    body:not([data-sheet="home"]) .leaflet-control-container .leaflet-bottom.leaflet-right { top: calc(var(--safe-top) + 70px); }
   }
   .leaflet-control-container .leaflet-bottom.leaflet-right .leaflet-control { margin: 0; }
   .leaflet-control-zoom {
@@ -810,7 +791,7 @@
   /* ================= Toasts ================= */
   #parked-toast, #snack {
     position: absolute; z-index: 780;
-    top: calc(var(--safe-top) + 70px);
+    top: calc(var(--safe-top) + 84px);
     left: calc(14px + var(--safe-left)); right: calc(14px + var(--safe-right));
     display: flex; align-items: center; gap: 12px;
     padding: 10px 10px 10px 12px;
@@ -933,6 +914,29 @@
   .btn-delete { background: rgba(226,87,76,.18); color: var(--alert); }
   .btn-cancel { background: var(--basalt-800); color: var(--fog); }
 
+  /* ================= Yandex live-traffic view ================= */
+  #ytraffic { position: fixed; inset: 0; z-index: 935; background: #1b1d24; display: none; }
+  #ytraffic.open { display: block; animation: fadeIn .25s both; }
+  .yt-frame, .yt-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .yt-bar {
+    position: absolute; z-index: 2;
+    top: calc(var(--safe-top) + 10px); left: calc(12px + var(--safe-left));
+    display: flex; align-items: center; gap: 10px;
+    background: var(--float-bg); border-radius: 20px; padding: 6px 16px 6px 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  .yt-title { line-height: 1.2; }
+  .yt-title b { display: block; font-size: 14px; font-weight: 700; }
+  .yt-title span { display: block; font-size: 12px; color: var(--fog); }
+  #yt-error {
+    display: none; position: absolute; inset: 0; z-index: 3;
+    flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    text-align: center; padding: 28px; background: var(--basalt-900);
+  }
+  #yt-error.show { display: flex; }
+  #yt-error b { font-size: 18px; }
+  #yt-error p { margin: 0 0 14px; font-size: 14px; color: var(--fog); max-width: 320px; line-height: 1.5; }
+
   /* ================= Motion ================= */
   @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(20,21,26,.45); } 70% { box-shadow: 0 0 0 10px rgba(20,21,26,0); } 100% { box-shadow: 0 0 0 0 rgba(20,21,26,0); } }
   @keyframes ringBtn { 0% { box-shadow: 0 0 0 0 rgba(245,165,54,.6), 0 4px 16px rgba(0,0,0,.4); } 70% { box-shadow: 0 0 0 14px rgba(245,165,54,0), 0 4px 16px rgba(0,0,0,.4); } 100% { box-shadow: 0 0 0 0 rgba(245,165,54,0), 0 4px 16px rgba(0,0,0,.4); } }
@@ -955,21 +959,77 @@
     *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; transition-duration: .01ms !important; }
   }
 
-  /* ================= Wider screens: the sheet becomes a left-docked panel ================= */
+  @media (max-width: 768px) { body.admin-on #snack, body.admin-on #parked-toast { left: calc(58px + var(--safe-left)); } }   /* phone/tablet layout only */
+  /* a narrow window with a mouse still shows the zoom buttons: keep messages clear of them */
+  @media (pointer: fine) and (max-width: 768px) { #parked-toast, #snack { right: calc(70px + var(--safe-right)); } }
+
+  /* ================= Keyboard + mouse polish (harmless on touch) ================= */
+  :focus-visible { outline: 2px solid var(--apricot); outline-offset: 2px; }
+  button:focus:not(:focus-visible), [role="switch"]:focus:not(:focus-visible) { outline: none; }
+  .dest-title, .rec-name, .search-item-title, .search-item-sub, .leaflet-popup-content, #dest-sub { -webkit-user-select: text; user-select: text; }
+  @media (hover: hover) {
+    .fab:hover, #locate-btn:hover, .leaflet-control-zoom a:hover { background: var(--basalt-800); }
+    .place:hover, .status-pill:hover, #where-btn:hover { background: #2d303b; }
+    .rec-card:hover:not(.selected), .search-item:hover, .layer-row:hover { background: rgba(255,255,255,.04); }
+    .round-btn:hover { background: #3d404c; }
+    #loc-banner-cta:hover, .steps-cta:hover, #nudge-cta:hover { filter: brightness(1.08); }
+  }
+
+  /* ================= Laptops and desktops: a floating panel on the left =================
+     The panel is the one big thing, so it is sized from the space that is actually free:
+       - below the top row (menu button, address header, legend button): --desk-top
+       - above the location bar when that is showing (--banner-h)
+     The locate button and trip status sit BESIDE the panel, in the map area, so they never cover
+     the panel, the top buttons, or each other. */
   @media (min-width: 769px) {
-    #sidebar { right: auto; left: 14px; width: 420px; }
-    #sidebar.mode-search { height: calc(100dvh - var(--safe-top) - 6px); }
-    #sidebar.mode-dest, #sidebar.mode-traffic { max-height: 70dvh; }
-    #layers-sheet { left: 14px; right: auto; width: 420px; }
+    :root { --desk-top: 72px; }
+    body.loc-banner { --banner-h: 62px; }                              /* 52px bar + 10px gap */
+
+    #sidebar {
+      --desk-free: calc(100dvh - var(--desk-top) - 14px - max(var(--kb, 0px), var(--banner-h)));   /* resolved HERE so it sees the banner */
+      right: auto; left: 14px; width: 420px;
+      bottom: calc(14px + max(var(--kb, 0px), var(--banner-h)));
+      max-height: var(--desk-free);
+      border-radius: 24px;
+      padding-bottom: 0;
+    }
+    body.loc-banner #sidebar { padding-bottom: 0; }
+    #sidebar.mode-search { bottom: calc(14px + max(var(--kb, 0px), var(--banner-h))); height: min(720px, var(--desk-free)); }
+    #sidebar.mode-dest, #sidebar.mode-traffic { max-height: min(70dvh, var(--desk-free)); }
+    #sidebar.sheet-collapsed { transform: translateY(calc(100% - 88px)); }
+
+    .sheet-float { left: calc(100% + 12px); right: auto; bottom: 0; width: max-content; justify-content: flex-start; gap: 10px; }
+    #sidebar.mode-search .sheet-float { display: flex; }
+    body.admin-on .sheet-float { left: calc(100% + 58px); }     /* make room for the admin toolbar column */
+
+    /* the location bar sits under the panel, same width */
+    #loc-banner {
+      right: auto; left: 14px; width: 420px; bottom: 14px; height: 52px;
+      padding: 7px 12px; border-radius: 16px; transform: translateY(calc(100% + 24px));
+    }
+    body.loc-banner #loc-banner { transform: none; }
+
+    /* messages go in the map area, clear of the panel and of the top buttons */
+    #parked-toast, #snack { left: auto; right: 14px; top: 70px; width: min(380px, calc(100vw - 446px - 72px)); }
+    #hint-banner { left: calc(446px + (100% - 446px) / 2); }
+
+    /* map credit bottom-right (the panel would hide it bottom-left); admin toolbar beside the panel */
+    .leaflet-control-container .leaflet-bottom.leaflet-left { top: auto; left: auto; right: 8px; bottom: 6px; }
+    .leaflet-control-container .leaflet-top.leaflet-left { top: var(--desk-top); left: 446px; }
+
+    #layers-sheet { left: 14px; right: auto; width: 420px; bottom: 14px; border-radius: 24px; }
+  }
+  /* short windows (small laptops, phones on their side): keep the top row clear */
+  @media (min-width: 769px) and (max-height: 560px) {
+    :root { --desk-top: 62px; }
+    #sidebar.mode-dest, #sidebar.mode-traffic { max-height: var(--desk-free); }
   }
   .search-item-ico { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-landmark { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 10 12 4l9 6M5 10v9M9.5 10v9M14.5 10v9M19 10v9M3 20h18'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-street { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5.5' cy='19.5' r='2.2'/%3E%3Ccircle cx='18.5' cy='6.5' r='2.2'/%3E%3Cpath d='M7.7 19.5H14a3.25 3.25 0 0 0 0-6.5H10a3.25 3.25 0 0 1 0-6.5h6.3'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-address { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
   #sidebar.mode-search .place::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
-  .g-pin { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
-  .g-live { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='7.5' y='2.5' width='9' height='19' rx='3.5'/%3E%3Ccircle cx='12' cy='8' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='12' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='16' r='1.2' fill='%2334c77b'/%3E%3C/g%3E%3C/svg%3E"); }
-  .g-auto { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
+  .d-ytraffic::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='7.5' y='2.5' width='9' height='19' rx='3.5'/%3E%3Ccircle cx='12' cy='8' r='1.2' fill='%23f5a536'/%3E%3Ccircle cx='12' cy='12' r='1.2' fill='%23f5a536'/%3E%3Ccircle cx='12' cy='16' r='1.2' fill='%23f5a536'/%3E%3C/g%3E%3C/svg%3E"); }
   .d-autopark::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
   .nudge-ico.n-location { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 19.5 20 12 16 4.5 20z'/%3E%3C/g%3E%3C/svg%3E"); }
   .nudge-ico.n-install { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7.500 10.500 12 15l4.500-4.500M5 19.500h14'/%3E%3C/g%3E%3C/svg%3E"); }
@@ -997,7 +1057,7 @@
   <aside id="sidebar" class="mode-home">
 
     <div class="sheet-float">
-      <button type="button" id="locate-btn" class="press" aria-label="Show my location" onclick="locateMe()"><span class="ico" style="--icon:var(--i-locate)"></span></button>
+      <button type="button" id="locate-btn" class="press" aria-label="Show my location" title="Show my location" onclick="locateMe()"><span class="ico" style="--icon:var(--i-locate)"></span></button>
       <!-- Only visible while a drive is being tracked, so automatic parking detection is never invisible -->
       <button type="button" id="trip-pill" class="chip hidden" onclick="openMenu()"><span class="live-dot"></span><span id="trip-pill-text">Tracking your drive</span></button>
     </div>
@@ -1016,7 +1076,7 @@
       <!-- SEARCH: input + live results -->
       <div id="search-bar-wrap">
         <div class="sheet-search-row">
-          <button type="button" id="search-close-btn" aria-label="Back" onclick="closeSearchMode()"><span class="ico" style="--icon:var(--i-arrow)"></span></button>
+          <button type="button" id="search-close-btn" aria-label="Back" title="Back (Esc)" onclick="closeSearchMode()"><span class="ico" style="--icon:var(--i-arrow)"></span></button>
           <div class="search-input-box">
             <input type="text" id="search-input" placeholder="Where to?" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false" />
             <button id="search-clear-btn" class="search-clear-btn hidden" aria-label="Clear" onclick="clearSearchInput()">&times;</button>
@@ -1052,7 +1112,7 @@
             <div class="dest-title" id="dest-coords">—</div>
             <div class="dest-sub" id="dest-sub">Finding the best spots…</div>
           </div>
-          <button type="button" id="clear-destination" class="round-btn" aria-label="Clear destination" onclick="clearDestination()">&times;</button>
+          <button type="button" id="clear-destination" class="round-btn" aria-label="Clear destination" title="Clear destination" onclick="clearDestination()">&times;</button>
         </div>
         <div id="rec-list">
           <div id="rec-empty">Set a destination to see the three best-scoring parking spots within 500&nbsp;m — ranked by type, live availability, and distance.</div>
@@ -1079,14 +1139,14 @@
 
   <div id="map-wrap">
 
-    <button type="button" id="menu-btn" class="fab press" aria-label="Menu" onclick="openMenu()"><img src="/icon.svg" alt="parkaway" width="46" height="46" /></button>
+    <button type="button" id="menu-btn" class="fab press" aria-label="Menu" title="Menu" onclick="openMenu()"><img src="/icon.svg" alt="parkaway" width="46" height="46" /></button>
 
     <button type="button" id="loc-chip" aria-label="Centre on my location" onclick="locateMe()">
       <span class="loc-label"><span id="loc-label-text">Parking in</span> &middot; <span id="weather-display">--°C</span> &rsaquo;</span>
       <span id="loc-street">Kentron, Yerevan</span>
     </button>
 
-    <button type="button" id="layers-btn" class="fab press" aria-label="Map legend" onclick="openLayers()"><span class="ico" style="--icon:var(--i-layers)"></span></button>
+    <button type="button" id="layers-btn" class="fab press" aria-label="Map legend" title="Map legend" onclick="openLayers()"><span class="ico" style="--icon:var(--i-layers)"></span></button>
 
     <div id="map"></div>
     <div id="hint-banner"><span class="dot"></span><span id="hint-text">Tap the map to drop a pin</span></div>
@@ -1153,24 +1213,7 @@
     </div>
   </div>
 
-  <!-- LOCATION: the one proper ask on first open (no skip: location is what the app is for) -->
-  <div id="loc-gate" class="hidden" role="dialog" aria-modal="true" aria-labelledby="loc-gate-title">
-    <div class="gate-card">
-      <img class="gate-logo" src="/icon.svg" alt="" />
-      <h2 id="loc-gate-title" class="display">Find parking where you are</h2>
-      <p class="gate-sub">parkaway needs your location to work. Without it we can only guess.</p>
-      <ul class="gate-list">
-        <li><span class="g-ico g-pin"></span><span><b>Spots within a 2-minute walk</b> of where you are right now</span></li>
-        <li><span class="g-ico g-live"></span><span><b>Live traffic and availability</b> for the streets around you</span></li>
-        <li><span class="g-ico g-auto"></span><span><b>Parking saved automatically</b>, no tapping when you park</span></li>
-      </ul>
-      <div class="gate-tip" id="loc-gate-tip"></div>
-      <button type="button" id="loc-gate-cta" class="gate-cta press" onclick="locGateAccept()">Turn on location</button>
-      <div class="gate-privacy">Only used while the app is open. Your route is never saved.</div>
-    </div>
-  </div>
-
-  <!-- LOCATION: stays at the bottom of the screen until location works. Deliberately no dismiss / "Not now". -->
+  <!-- LOCATION: a slim bar at the bottom while location is off. Deliberately no dismiss / "Not now". -->
   <div id="loc-banner" role="status" aria-live="polite" aria-hidden="true">
     <span class="loc-banner-ico"><span class="ico" style="--icon:var(--i-locate)"></span></span>
     <div class="loc-banner-text"><b id="loc-banner-title">Turn on location</b><span id="loc-banner-body"></span></div>
@@ -1182,10 +1225,26 @@
   <div id="loc-steps" role="dialog" aria-label="Turn on location">
     <div onclick="closeLocSteps()" style="display:flex; justify-content:center; padding:9px 0 8px; cursor:pointer;"><div class="handle-bar"></div></div>
     <div class="layers-title">Turn on location</div>
-    <p class="steps-sub">It takes about 20 seconds. We’ll notice the moment it’s on.</p>
+    <p class="steps-sub" id="loc-steps-note">It takes about 20 seconds. We’ll notice the moment it’s on.</p>
     <ol id="loc-steps-list"></ol>
-    <button type="button" class="gate-cta press" style="margin: 6px 18px 0; width: calc(100% - 36px);" onclick="locStepsDone()">I turned it on</button>
+    <button type="button" class="steps-cta press" onclick="locStepsDone()">I turned it on</button>
   </div>
+
+  {% if yandex_traffic %}
+  <!-- Yandex live-traffic map (isolated page in an iframe; see ytraffic_js) -->
+  <div id="ytraffic" role="dialog" aria-label="Yandex live traffic">
+    <div class="yt-frame"></div>
+    <div class="yt-bar">
+      <button type="button" class="round-btn" aria-label="Close live traffic" title="Close" onclick="closeYandexTraffic()">&times;</button>
+      <div class="yt-title"><b>Live traffic</b><span id="yt-status">Loading…</span></div>
+    </div>
+    <div id="yt-error">
+      <b>Yandex traffic isn’t available right now</b>
+      <p>It may be blocked on your network, or the Yandex key isn’t valid for this site.</p>
+      <button type="button" class="steps-cta press" style="margin:0; width:auto; padding:12px 24px;" onclick="closeYandexTraffic()">Back to the map</button>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Map legend: the only place the legend lives -->
   <div id="layers-scrim" onclick="closeLayers()"></div>
@@ -1223,6 +1282,12 @@
       <span class="switch"></span>
     </button>
     <button id="admin-toggle" class="layer-row d-row d-curation" onclick="closeMenu(); toggleAdminMode();">Admin / Curation Mode</button>
+    {% if yandex_traffic %}
+    <button type="button" id="ytraffic-toggle" class="layer-row d-row d-ytraffic" role="switch" aria-checked="false" onclick="toggleYandexTraffic()">
+      <span class="layer-name">Live traffic map<small>Yandex</small></span>
+      <span class="switch"></span>
+    </button>
+    {% endif %}
     <div class="menu-foot"><span class="live-dot"></span><span id="clock">--:--:--</span><span>&middot;</span><span id="data-source-tag">simulated feed</span></div>
   </aside>
 
@@ -2360,20 +2425,23 @@ function deleteAdminFeature() {
 //   - nothing re-checked after the user changed the setting, and a watch that iOS suspended in the
 //     background was never restarted
 // --------------------------------------------------------------------------
-const LOC_ASKED_KEY = 'parkaway.locAsked';       // the system prompt has been triggered at least once
 const LOC_EVER_KEY  = 'parkaway.locGranted';     // a position has worked on this device before
 const LOC_GOOD_M = 800;                           // accurate enough to trust (demo pin, centring)
 const LOC_IMPRECISE_M = 1500;                     // iOS "Precise Location: off" gives ~5-10 km
+const LOC_RETRY_MS = [1500, 3000, 5000, 8000];    // pauses between retries of a request that failed for a transient reason
 
-let locPerm = 'unknown';        // what the browser says: unknown | prompt | granted | denied
+let locPerm = 'unknown';        // what the browser CLAIMS (informational only, never trusted to decide anything)
 let locProblem = null;          // null | denied | stuck | timeout | unavailable | imprecise | unsupported
 let locBusy = false;
+let locBusySource = null;
+let locBusySince = 0;
+let locReq = 0;                 // token: a newer request / a fix cancels older retries
+let locRetryTimer = null;
 let locFixAt = 0;
 let locFirstAccuracy = null;
 let locWatchId = null;
 let locAttributed = false;
 let locRefined = false;
-let gateOpen = false;
 let probeTimer = null;
 let lastBannerKey = '';
 
@@ -2395,31 +2463,47 @@ function queryLocPermission(ms) {
 }
 
 // ---- the request itself ----------------------------------------------------------------
-// Must be called synchronously from a tap when it may need to show the system prompt.
+// The browser's own answer to getCurrentPosition is the only source of truth: it shows the
+// native prompt if the user hasn't decided, succeeds silently if allowed, and fails at once
+// with code 1 if blocked. (The Permissions API can disagree with what iOS will really do,
+// especially for home-screen apps, so it is never used to decide anything.)
+//
+// A request can fail for a TRANSIENT reason (code 2 "position unavailable" / code 3 "timeout").
+// iOS does exactly that for the first second or two after the user taps Allow, while the
+// location hardware starts up. That is not a failure: keep trying quietly, and keep a watch
+// running in parallel, since the watch delivers the first fix as soon as one exists.
+//
+// Must be called synchronously from a tap when it may need to show the prompt.
 function requestLocation(source, attempt) {
   attempt = attempt || 1;
   if (!locSupported()) { setLocProblem('unsupported'); renderLocationUI(); return; }
-  if (locBusy && attempt === 1) return;
-  locBusy = true;
-  lsSet(LOC_ASKED_KEY, '1');
+  if (attempt === 1) {
+    const background = source === 'launch' || source === 'auto';
+    if (locBusy && background && Date.now() - locBusySince < 20000) return;    // a tap always wins; background asks never stack
+    locReq++;
+    clearTimeout(locRetryTimer);
+    locBusy = true; locBusySource = source; locBusySince = Date.now();
+    startLocationWatch();                                            // parallel: also triggers the prompt, and catches the first fix
+    gaEvent('loc_requested', { source });
+  }
+  const req = locReq;
   renderLocationUI();
-  let finished = false;
-  // A prompt nobody answered, or an OS that never calls back: keep waiting, but say what to check.
-  const watchdog = setTimeout(() => { if (!finished) { locBusy = false; setLocProblem('stuck'); renderLocationUI(); } }, 25000);   // release the lock so the next tap tries again
-  // Quick coarse fix first (cell/Wi-Fi, a cached one is fine); the high-accuracy watch refines it.
-  const opts = attempt === 1
-    ? { enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 }
-    : { enableHighAccuracy: true, timeout: 20000, maximumAge: 600000 };
-  gaEvent('loc_requested', { source, attempt });
+  // coarse + cached first (fast), GPS on the second try, then coarse again
+  const opts = attempt === 2
+    ? { enableHighAccuracy: true, timeout: 20000, maximumAge: 600000 }
+    : { enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 };
   navigator.geolocation.getCurrentPosition(
     pos => {
-      finished = true; clearTimeout(watchdog); locBusy = false;
+      if (req !== locReq) return;
+      locBusy = false;
       onLocationFix(pos, source);
-      startLocationWatch();
     },
     err => {
-      finished = true; clearTimeout(watchdog);
-      if (err.code === 3 && attempt === 1) { requestLocation(source, 2); return; }   // timed out: one more try, GPS this time
+      if (req !== locReq) return;                                    // a newer request or a fix already took over
+      if (err.code !== 1 && attempt <= LOC_RETRY_MS.length) {        // transient: try again quietly
+        locRetryTimer = setTimeout(() => requestLocation(source, attempt + 1), LOC_RETRY_MS[attempt - 1]);
+        return;
+      }
       locBusy = false;
       onLocationError(err, source);
     },
@@ -2430,6 +2514,9 @@ function requestLocation(source, attempt) {
 function onLocationFix(pos, source) {
   const first = !locFixAt;
   const hadProblem = !!locProblem;
+  locReq++;                                   // any retry still pending is now pointless
+  clearTimeout(locRetryTimer);
+  locBusy = false;
   const acc = pos.coords.accuracy;
   locFixAt = Date.now();
   locPerm = 'granted';
@@ -2442,32 +2529,32 @@ function onLocationFix(pos, source) {
   // an approximate first fix followed by a precise one: centre on the precise one, once
   if (!locRefined && locFirstAccuracy > LOC_GOOD_M && acc <= 300) { locRefined = true; map.setView([userLat, userLon], 16); }
 
-  if (source === 'tap' || source === 'banner' || source === 'gate' || source === 'retry') {
+  if (source === 'tap' || source === 'banner' || source === 'retry') {
     map.flyTo([userLat, userLon], Math.max(map.getZoom(), 16), { duration: 0.7 });
   }
   if (first) gaEvent('loc_granted', { source, accuracy_m: Math.round(acc) });
   if (hadProblem && !locProblem && source !== 'watch') showSnack('Location is on. Showing spots near you.');
 
   stopProbeLoop();
-  closeLocGate();
   closeLocSteps();
   maybeDemoPin(pos.coords.latitude, pos.coords.longitude, acc);
   renderLocationUI();
 }
 
 function onLocationError(err, source) {
-  gaEvent('loc_error', { code: err.code, source });
-  if (err.code === 1) { locPerm = 'denied'; setLocProblem('denied'); }
-  else if (err.code === 2) setLocProblem('unavailable');
-  else setLocProblem('timeout');
-  closeLocGate();
-  const asked = source === 'tap' || source === 'banner' || source === 'gate' || source === 'retry';
-  if (asked) {
-    if (err.code === 1) showSnack('Location is blocked. Tap “Show me how” to turn it on.', 5000);
+  const kind = err.code === 1 ? 'denied' : (err.code === 2 ? 'unavailable' : 'timeout');
+  const repeat = locProblem === kind;
+  if (!repeat) gaEvent('loc_error', { code: err.code, source });
+  if (err.code === 1) locPerm = 'denied';
+  setLocProblem(kind);
+  locReq++; clearTimeout(locRetryTimer); locBusy = false;
+  const asked = source === 'tap' || source === 'banner' || source === 'retry';
+  if (asked && !repeat) {
+    if (err.code === 1) showSnack('Location is off for this app. Tap “How” to turn it on.', 5000);
     else if (err.code === 2) showSnack('Can’t get your position. Check that Location Services is on.', 5000);
     else showSnack('Couldn’t find you yet. Try near a window, or tap again.', 5000);
   }
-  if (source === 'tap' && err.code === 1) showLocSteps();     // they tried to use it: show exactly what to do
+  if (source === 'tap' && err.code === 1 && !repeat) showLocSteps();     // they tried to use it: show exactly what to do
   startProbeLoop();
   renderLocationUI();
 }
@@ -2479,7 +2566,11 @@ function startLocationWatch() {
   if (locWatchId !== null || !locSupported()) return;
   locWatchId = navigator.geolocation.watchPosition(
     pos => onLocationFix(pos, 'watch'),
-    err => { if (err.code === 1) { stopLocationWatch(); onLocationError(err, 'watch'); } },   // 2 / 3 are transient: keep watching
+    err => {
+      if (err.code !== 1) return;                          // 2 / 3 are transient: keep watching
+      stopLocationWatch();
+      if (!locBusy) onLocationError(err, 'watch');         // revoked mid-session; if a request is running, its own error handler reports it
+    },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
   );
 }
@@ -2488,19 +2579,10 @@ function stopLocationWatch() {
 }
 
 // Settings changed / app resumed: look again without bothering the user.
-async function refreshLocationState() {
-  if (!locSupported()) return;
-  const st = await queryLocPermission();
-  locPerm = st;
-  if (st === 'granted') {
-    if (Date.now() - locFixAt > 30000 && !locBusy) requestLocation('auto');
-  } else if (st === 'denied') {
-    setLocProblem('denied');
-    startProbeLoop();
-  } else if (locProblem === 'denied') {
-    setLocProblem(null);        // it is no longer blocked
-  }
-  renderLocationUI();
+function refreshLocationState() {
+  if (!locSupported() || locBusy) return;
+  queryLocPermission().then(st => { locPerm = st; });                    // informational, and re-hooks onchange
+  if (!locFixAt || Date.now() - locFixAt > 30000) requestLocation('auto');
 }
 
 // While blocked / failing, quietly try again every few seconds so that turning it on in Settings
@@ -2508,7 +2590,7 @@ async function refreshLocationState() {
 function startProbeLoop() {
   if (probeTimer) return;
   probeTimer = setInterval(() => {
-    const failing = ['denied', 'stuck', 'timeout', 'unavailable'].includes(locProblem) || locPerm === 'denied';
+    const failing = ['denied', 'stuck', 'timeout', 'unavailable'].includes(locProblem);
     if (document.hidden || locBusy || !failing || !locSupported()) return;
     navigator.geolocation.getCurrentPosition(
       pos => { onLocationFix(pos, 'probe'); startLocationWatch(); },
@@ -2542,39 +2624,25 @@ function locateMe() {
 }
 function initGeolocation() { requestLocation('legacy'); }
 
-// ---- UI: first-run gate, persistent banner, steps -----------------------------------------
+// ---- UI: the (small, persistent) bottom message, and the steps ---------------------------------
 function platformTip() {
-  if (isIosDevice()) return 'When your iPhone asks, tap <b>Allow</b> (or <b>Allow While Using App</b>).';
-  if (isAndroidDevice()) return 'When asked, tap <b>Allow</b> (or <b>While using the app</b>).';
-  return 'When your browser asks, click <b>Allow</b>.';
-}
-
-function openLocGate() {
-  gateOpen = true;
-  document.getElementById('loc-gate-tip').innerHTML = platformTip();
-  document.getElementById('loc-gate').classList.remove('hidden');
-  gaEvent('loc_gate_shown', {});
-}
-function closeLocGate() {
-  gateOpen = false;
-  document.getElementById('loc-gate').classList.add('hidden');
-}
-function locGateAccept() {
-  const btn = document.getElementById('loc-gate-cta');
-  btn.disabled = true;
-  btn.textContent = 'Waiting for your answer…';
-  requestLocation('gate');                 // synchronous inside the tap
+  if (isIosDevice()) return 'When your iPhone asks, tap Allow.';
+  if (isAndroidDevice()) return 'When asked, tap Allow.';
+  return 'When your browser asks, click Allow.';
 }
 
 function bannerModel() {
   if (locFixAt && !locProblem) return null;                  // we know where they are: nothing to say
-  if (gateOpen) return null;
-  if (locBusy) return { key: 'busy', title: 'Finding you…', body: platformTip().replace(/<\/?b>/g, ''), cta: null };
-  if (locProblem === 'unsupported') return { key: 'unsupported', title: 'Location isn’t available', body: 'Open parkaway in Safari or Chrome to find spots near you.', cta: null };
-  if (locProblem === 'denied' || locPerm === 'denied') return { key: 'denied', title: 'Location is blocked', body: 'Turn it on in Settings so we can find spots near you.', cta: 'Show me how' };
-  if (locProblem === 'imprecise') return { key: 'imprecise', title: 'Location is approximate', body: 'Turn on Precise Location to get exact spots.', cta: 'Show me how' };
-  if (locProblem) return { key: 'retry', title: 'Can’t find you yet', body: 'Check that Location Services is on, then try again.', cta: 'Try again' };
-  return { key: 'prompt', title: 'Turn on location', body: 'Find a free spot within a 2-minute walk of you.', cta: 'Turn on' };
+  // right after launch the system prompt is on screen: say nothing until it has been answered
+  if (locBusy) {
+    if (locBusySource === 'launch' || locBusySource === 'auto') return null;
+    return { key: 'busy', title: 'Finding you…', body: platformTip(), cta: null };
+  }
+  if (locProblem === 'unsupported') return { key: 'unsupported', title: 'Location isn’t available', body: 'Open parkaway in Safari or Chrome.', cta: null };
+  if (locProblem === 'denied') return { key: 'denied', title: 'Turn on location', body: 'to see parking spots near you', cta: 'How' };
+  if (locProblem === 'imprecise') return { key: 'imprecise', title: 'Location is approximate', body: 'Turn on Precise Location', cta: 'How' };
+  if (locProblem) return { key: 'retry', title: 'Can’t find you yet', body: 'Check that Location Services is on', cta: 'Try again' };
+  return { key: 'prompt', title: 'Turn on location', body: 'to see parking spots near you', cta: 'Turn on' };
 }
 
 function renderLocationUI() {
@@ -2583,7 +2651,6 @@ function renderLocationUI() {
   document.body.classList.toggle('loc-ok', ok);
   document.body.classList.toggle('loc-banner', !!model);
 
-  const banner = document.getElementById('loc-banner');
   const key = model ? model.key : '';
   if (key !== lastBannerKey) {
     lastBannerKey = key;
@@ -2596,41 +2663,40 @@ function renderLocationUI() {
       gaEvent('loc_banner_shown', { kind: key });
     }
   }
-  banner.setAttribute('aria-hidden', model ? 'false' : 'true');
+  document.getElementById('loc-banner').setAttribute('aria-hidden', model ? 'false' : 'true');
 
-  // top chip + arrow button advertise the problem until it is solved
+  // the top header and the arrow button quietly say "off" until it is solved
   const label = document.getElementById('loc-label-text');
-  document.getElementById('loc-chip').classList.toggle('off', !ok);
-  document.getElementById('locate-btn').classList.toggle('off', !ok);
-  document.getElementById('locate-btn').classList.toggle('busy', locBusy);
-  const want = ok ? 'Your location' : (locProblem === 'imprecise' ? 'Approximate location' : 'Location is off');
-  if (label.textContent !== want && (!ok || label.textContent === 'Location is off' || label.textContent === 'Approximate location')) label.textContent = want;
-
-  const gateBtn = document.getElementById('loc-gate-cta');
-  if (gateOpen && !locBusy) { gateBtn.disabled = false; gateBtn.textContent = 'Turn on location'; }
+  document.getElementById('locate-btn').classList.toggle('busy', locBusy && locBusySource !== 'launch' && locBusySource !== 'auto');
+  const waiting = !ok && !locProblem && locBusy;              // the system prompt is probably on screen
+  const want = ok ? 'Your location' : waiting ? 'Parking in' : (locProblem === 'imprecise' ? 'Approximate location' : 'Location is off');
+  document.getElementById('loc-chip').classList.toggle('off', !ok && !waiting);
+  document.getElementById('locate-btn').classList.toggle('off', !ok && !waiting);
+  if (label.textContent !== want) label.textContent = want;
 }
 
 function locBannerAction() {
   const m = bannerModel();
   if (!m || !m.cta) return;
   if (m.key === 'denied' || m.key === 'imprecise') showLocSteps(m.key);
-  else requestLocation('banner');          // synchronous inside the tap
+  else requestLocation('banner');          // synchronous inside the tap, so iOS shows the prompt
 }
 
 function showLocSteps(kind) {
   const ol = document.getElementById('loc-steps-list');
   const precise = kind === 'imprecise';
-  let steps;
+  let steps, note = 'It takes about 20 seconds. We’ll notice the moment it’s on.';
   if (isIosDevice()) {
-    steps = precise
-      ? ['Open the <b>Settings</b> app', 'Tap <b>Privacy &amp; Security</b> › <b>Location Services</b>', 'Tap <b>Safari Websites</b> (or <b>parkaway</b> if it is listed)', 'Turn <b>Precise Location</b> on']
-      : ['Open the <b>Settings</b> app', 'Tap <b>Privacy &amp; Security</b> › <b>Location Services</b> and make sure it is <b>on</b>', 'Tap <b>Safari Websites</b> (or <b>parkaway</b> if it is listed)', 'Choose <b>While Using the App</b>'];
+    const app = isStandalone() ? '<b>parkaway</b> (if it isn’t listed, <b>Safari Websites</b>)' : '<b>Safari Websites</b>';
+    steps = ['Open the <b>Settings</b> app', 'Tap <b>Privacy &amp; Security</b> › <b>Location Services</b> and make sure it is <b>on</b>', 'Scroll down and tap ' + app, precise ? 'Turn <b>Precise Location</b> on' : 'Choose <b>While Using the App</b>'];
+    if (isStandalone()) note = 'On iPhone, allowing location in Safari does not carry over to the home-screen app: it needs its own permission. ' + note;
   } else if (isAndroidDevice()) {
     steps = ['Tap the <b>⋮</b> menu › <b>Settings</b> › <b>Site settings</b> › <b>Location</b>', 'Find this site and choose <b>Allow</b>', 'If it is off for the whole phone: <b>Settings › Location</b> and switch it <b>on</b>'];
   } else {
     steps = ['Click the <b>lock</b> icon next to the address', 'Open <b>Site settings</b> and set <b>Location</b> to <b>Allow</b>', 'Come back here, we will notice automatically'];
   }
   ol.innerHTML = steps.map(s => `<li>${s}</li>`).join('');
+  document.getElementById('loc-steps-note').textContent = note;
   document.getElementById('loc-steps').classList.add('open');
   document.getElementById('loc-steps-scrim').classList.add('open');
   gaEvent('loc_steps_shown', { kind: kind || 'denied' });
@@ -2645,22 +2711,16 @@ function locStepsDone() {
 }
 
 // ---- boot --------------------------------------------------------------------------------
-async function initLocation() {
+// No explanation screen first: ask the system straight away. If it is allowed (in this app) it
+// simply works; if the user taps "Don't Allow", the small bottom message appears.
+function initLocation() {
   document.addEventListener('visibilitychange', onAppResumed);
   window.addEventListener('pageshow', onAppResumed);
   if (!locSupported() || window.isSecureContext === false) { setLocProblem('unsupported'); renderLocationUI(); return; }
-
-  const st = await queryLocPermission();
-  locPerm = st;
-  const asked = !!lsGet(LOC_ASKED_KEY, '');
-  const ever = !!lsGet(LOC_EVER_KEY, '');
-
-  if (st === 'granted') requestLocation('auto');                       // already allowed: just have it
-  else if (st === 'denied') { setLocProblem('denied'); startProbeLoop(); }
-  else if (ever) requestLocation('auto');                              // it worked before; the OS is re-asking: ask straight away, no pitch
-  else if (!asked) openLocGate();                                      // first ever open: the one proper ask
-  // else: asked before and never decided -> the banner (below) keeps offering it
-  renderLocationUI();
+  requestLocation('launch');
+  queryLocPermission().then(st => { locPerm = st; });
+  // if the prompt could not be shown without a tap, the bar below offers a one-tap "Turn on"
+  setTimeout(() => { if (!locFixAt && !locProblem) { locBusy = false; renderLocationUI(); } }, 10000);
 }
 
 // --------------------------------------------------------------------------
@@ -2791,6 +2851,7 @@ function formatDistance(m) {
 }
 
 function showSnack(text, ms) {
+  document.getElementById('hint-banner').classList.remove('show');     // never two messages on top of each other
   const el = document.getElementById('snack');
   el.textContent = text;
   el.classList.add('show');
@@ -3371,6 +3432,15 @@ function initSheetUI() {
   setTimeout(() => document.body.classList.remove('intro'), 5200);
 
   renderSegmentsToggle();
+  // the page carries a plain class while admin mode is on, so layout rules can make room for the drawing toolbar
+  const adminBtn = document.getElementById('admin-toggle');
+  new MutationObserver(() => document.body.classList.toggle('admin-on', adminBtn.classList.contains('active')))
+    .observe(adminBtn, { attributes: true, attributeFilter: ['class'] });
+  document.getElementById('presets').addEventListener('wheel', (e) => {
+    if (sheetMode !== 'home' || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    e.currentTarget.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
   lsSet('parkaway.visits', String((parseInt(lsGet('parkaway.visits', '0'), 10) || 0) + 1));
   initLocation();
 
@@ -3392,7 +3462,7 @@ function initSheetUI() {
   // A one-time pointer to the map's other superpower, for people who haven't used it yet.
   if (!lsGet('parkaway.hintSeen', '')) {
     setTimeout(() => {
-      if (currentDest || sheetMode !== 'home') return;
+      if (currentDest || sheetMode !== 'home' || document.getElementById('snack').classList.contains('show')) return;
       const hint = document.getElementById('hint-banner');
       hint.classList.add('show');
       lsSet('parkaway.hintSeen', '1');
@@ -3401,6 +3471,104 @@ function initSheetUI() {
   }
 }
 document.addEventListener('DOMContentLoaded', initSheetUI);
+
+// --------------------------------------------------------------------------
+// Yandex live-traffic view (menu toggle, only present when YANDEX_MAPS_API_KEY is set)
+//
+// Why a separate page in an iframe: Yandex's free-tier terms require anything received through
+// its API (they name traffic explicitly) to be shown on a Yandex map, and forbid showing Yandex
+// maps through a third-party API. So the traffic layer can't go on the Leaflet map. Instead the
+// toggle opens a full-screen Yandex map (/traffic-map) with Yandex's own live-traffic layer.
+// Its logo and copyright stay visible at the bottom of that map, as the terms require, and the
+// script only loads when someone actually turns this on.
+// --------------------------------------------------------------------------
+let ytFrame = null;
+let ytTimer = null;
+let ytLastView = null;
+
+function ytEls() {
+  return {
+    box: document.getElementById('ytraffic'),
+    toggle: document.getElementById('ytraffic-toggle'),
+    status: document.getElementById('yt-status'),
+    error: document.getElementById('yt-error')
+  };
+}
+
+function toggleYandexTraffic() {
+  const { box } = ytEls();
+  if (!box) return;
+  if (box.classList.contains('open')) closeYandexTraffic(); else openYandexTraffic();
+}
+
+function openYandexTraffic() {
+  const { box, toggle, status, error } = ytEls();
+  if (!box || box.classList.contains('open')) return;
+  closeMenu();
+  closeLayers();
+
+  const c = map.getCenter();
+  const p = new URLSearchParams({ lat: c.lat.toFixed(6), lon: c.lng.toFixed(6), z: String(map.getZoom()) });
+  if (userLat != null && userLon != null) { p.set('ulat', userLat.toFixed(6)); p.set('ulon', userLon.toFixed(6)); }
+  if (currentDest) { p.set('dlat', currentDest.lat.toFixed(6)); p.set('dlon', currentDest.lon.toFixed(6)); p.set('dl', currentDest.label || ''); }
+  if (recMarkers.length) p.set('r', recMarkers.map(m => { const ll = m.getLatLng(); return `${ll.lat.toFixed(6)},${ll.lng.toFixed(6)}`; }).join('|'));
+
+  ytLastView = null;
+  error.classList.remove('show');
+  status.textContent = 'Loading…';
+  ytFrame = document.createElement('iframe');
+  ytFrame.title = 'Yandex live traffic';
+  ytFrame.src = '/traffic-map?' + p.toString();
+  box.querySelector('.yt-frame').appendChild(ytFrame);
+  box.classList.add('open');
+  toggle.setAttribute('aria-checked', 'true');
+  clearTimeout(ytTimer);
+  ytTimer = setTimeout(() => ytFail('timeout'), 15000);
+  gaEvent('yandex_traffic_opened', {});
+}
+
+function closeYandexTraffic() {
+  const { box, toggle } = ytEls();
+  if (!box) return;
+  clearTimeout(ytTimer);
+  box.classList.remove('open');
+  if (toggle) toggle.setAttribute('aria-checked', 'false');
+  if (ytFrame) { ytFrame.remove(); ytFrame = null; }       // frees the map and stops its traffic refreshes
+  // the user may have panned around over there: let our own map follow
+  if (ytLastView && Array.isArray(ytLastView.center)) {
+    map.setView(ytLastView.center, Math.max(3, Math.min(19, ytLastView.zoom || map.getZoom())), { animate: false });
+  }
+}
+
+function ytFail(why) {
+  const { status, error } = ytEls();
+  clearTimeout(ytTimer);
+  if (!error) return;
+  status.textContent = 'Unavailable';
+  error.classList.add('show');
+  gaEvent('yandex_traffic_error', { why: String(why || '') });
+}
+
+window.addEventListener('message', (e) => {
+  if (e.origin !== location.origin || !ytFrame || e.source !== ytFrame.contentWindow) return;
+  const m = e.data;
+  if (!m || m.type !== 'ytraffic') return;
+  const { status } = ytEls();
+  if (m.event === 'ready') { clearTimeout(ytTimer); if (status.textContent === 'Loading…') status.textContent = 'Live'; }
+  else if (m.event === 'level' && typeof m.level === 'number') status.textContent = `Traffic ${Math.round(m.level)}/10`;
+  else if (m.event === 'view') ytLastView = m;
+  else if (m.event === 'error') ytFail(m.why);
+});
+
+// Escape closes whatever is open on top (handy on a laptop)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const box = document.getElementById('ytraffic');
+  if (box && box.classList.contains('open')) { closeYandexTraffic(); return; }
+  if (document.getElementById('loc-steps').classList.contains('open')) { closeLocSteps(); return; }
+  if (document.getElementById('layers-sheet').classList.contains('open')) { closeLayers(); return; }
+  if (document.getElementById('menu-drawer').classList.contains('open')) { closeMenu(); }
+});
 </script>
 </body>
 </html>

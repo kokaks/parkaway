@@ -28,6 +28,7 @@ Production-ready Flask backend that:
  12. Live data layer: real per-street traffic (HERE / TomTom / Yandex Router, whichever has a
      key; otherwise a per-street simulation), an OpenStreetMap POI inventory with opening hours,
      optional BestTime live busyness. Admin diagnostics at /api/admin/data-sources.
+ 13. Keeps a Render free-tier service awake: /healthz plus a self-ping thread (KEEPALIVE=off to disable).
 
 Run:
     pip install -r requirements.txt
@@ -3485,6 +3486,67 @@ def api_admin_data_sources():
         "besttime_configured": bool(os.environ.get("BESTTIME_API_KEY", "").strip()),
     }
     return jsonify(out)
+
+
+# --------------------------------------------------------------------------
+# Keep-alive (Render's free tier stops a web service after ~15 min without inbound traffic)
+# --------------------------------------------------------------------------
+# While the service is running, a background thread requests the service's own PUBLIC url
+# every KEEPALIVE_INTERVAL_S (default 10 min). That request goes out and back in through
+# Render's edge, so it counts as real inbound traffic and the instance never idles out.
+#   - on by default on Render (RENDER_EXTERNAL_URL is set automatically there); set
+#     KEEPALIVE=off to disable, or KEEPALIVE_URL to ping a different address
+#   - /healthz is deliberately tiny and never touches the database, so pinging it doesn't
+#     keep a serverless Postgres (Neon) awake and burn its compute hours
+#   - it can't wake a service that is already asleep: for that, point a free uptime monitor
+#     (UptimeRobot, cron-job.org) at /healthz as well
+_KEEPALIVE = {"started": False}
+
+
+@app.route("/healthz")
+def healthz():
+    resp = make_response("ok")
+    resp.headers["Content-Type"] = "text/plain; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _keepalive_loop(url: str, interval: float):
+    time.sleep(min(60.0, interval))                       # let the server finish booting first
+    while True:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _UA + " keepalive"})
+            with urllib.request.urlopen(req, timeout=25) as r:
+                r.read(8)
+        except Exception as exc:
+            print(f"[keepalive] ping failed ({_redact(exc)}); will retry")
+        time.sleep(interval + random.uniform(0, 20))      # jitter so several workers don't ping in lockstep
+
+
+def _start_keepalive():
+    if _KEEPALIVE["started"] or os.environ.get("KEEPALIVE", "on").strip().lower() == "off":
+        return
+    base = (os.environ.get("KEEPALIVE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not base:
+        return
+    try:
+        interval = max(120.0, min(840.0, float(os.environ.get("KEEPALIVE_INTERVAL_S", "600"))))
+    except ValueError:
+        interval = 600.0
+    _KEEPALIVE["started"] = True
+    url = base if base.endswith("/healthz") else base + "/healthz"
+    threading.Thread(target=_keepalive_loop, args=(url, interval), daemon=True, name="keepalive").start()
+    print(f"[keepalive] pinging {url} every {int(interval)}s so the service never idles out")
+
+
+@app.before_request
+def _ensure_keepalive():
+    # also covers servers that import the app once and then fork workers (the thread must start in the worker)
+    if not _KEEPALIVE["started"]:
+        _start_keepalive()
+
+
+_start_keepalive()
 
 
 if __name__ == "__main__":

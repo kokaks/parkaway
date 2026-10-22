@@ -3493,13 +3493,19 @@ def api_admin_data_sources():
 # --------------------------------------------------------------------------
 # While the service is running, a background thread requests the service's own PUBLIC url
 # every KEEPALIVE_INTERVAL_S (default 10 min). That request goes out and back in through
-# Render's edge, so it counts as real inbound traffic and the instance never idles out.
-#   - on by default on Render (RENDER_EXTERNAL_URL is set automatically there); set
-#     KEEPALIVE=off to disable, or KEEPALIVE_URL to ping a different address
-#   - /healthz is deliberately tiny and never touches the database, so pinging it doesn't
-#     keep a serverless Postgres (Neon) awake and burn its compute hours
-#   - it can't wake a service that is already asleep: for that, point a free uptime monitor
-#     (UptimeRobot, cron-job.org) at /healthz as well
+# Render's edge, so it counts as real inbound traffic and the instance doesn't idle out.
+#
+# It only does this during Yerevan daytime, 08:00 - 24:00 (Armenia is UTC+4 all year, no
+# daylight saving). Overnight the pings stop, so Render winds the service down after ~15 idle
+# minutes and the free instance hours aren't spent while nobody is parking. A visitor at night
+# simply wakes it (a ~30 s cold start) and it winds down again 15 minutes after the last request.
+#   KEEPALIVE=off                  disable entirely
+#   KEEPALIVE_START_HOUR / KEEPALIVE_END_HOUR   Yerevan hours (default 8 and 24)
+#   KEEPALIVE_URL                  ping a different address (custom domain)
+#   KEEPALIVE_INTERVAL_S           2-14 min, default 10
+# /healthz is deliberately tiny and never touches the database, so pinging it doesn't keep a
+# serverless Postgres (Neon) awake. A sleeping service can't ping itself: to be awake at 08:00
+# sharp, point a free scheduler (cron-job.org) at /healthz for those hours (see the README note).
 _KEEPALIVE = {"started": False}
 
 
@@ -3511,16 +3517,51 @@ def healthz():
     return resp
 
 
-def _keepalive_loop(url: str, interval: float):
+_YEREVAN_UTC_OFFSET_H = 4        # Armenia has been UTC+4 year-round since 2012
+
+
+def _yerevan_now() -> datetime:
+    return datetime.utcnow() + timedelta(hours=_YEREVAN_UTC_OFFSET_H)
+
+
+def _keepalive_hours() -> tuple[int, int]:
+    def hour(name, default):
+        try:
+            return max(0, min(24, int(os.environ.get(name, default))))
+        except ValueError:
+            return default
+    return hour("KEEPALIVE_START_HOUR", 8), hour("KEEPALIVE_END_HOUR", 24)
+
+
+def _keepalive_active(local: datetime) -> bool:
+    start, end = _keepalive_hours()
+    return start <= local.hour < end if start < end else (local.hour >= start or local.hour < end)
+
+
+def _seconds_until_window(local: datetime) -> float:
+    start, _ = _keepalive_hours()
+    target = local.replace(hour=start % 24, minute=0, second=0, microsecond=0)
+    if target <= local:
+        target += timedelta(days=1)
+    return (target - local).total_seconds()
+
+
+def _keepalive_loop(url: str, interval: float, now_fn=None):
+    now_fn = now_fn or _yerevan_now
     time.sleep(min(60.0, interval))                       # let the server finish booting first
     while True:
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": _UA + " keepalive"})
-            with urllib.request.urlopen(req, timeout=25) as r:
-                r.read(8)
-        except Exception as exc:
-            print(f"[keepalive] ping failed ({_redact(exc)}); will retry")
-        time.sleep(interval + random.uniform(0, 20))      # jitter so several workers don't ping in lockstep
+        local = now_fn()
+        if _keepalive_active(local):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": _UA + " keepalive"})
+                with urllib.request.urlopen(req, timeout=25) as r:
+                    r.read(8)
+            except Exception as exc:
+                print(f"[keepalive] ping failed ({_redact(exc)}); will retry")
+            time.sleep(interval + random.uniform(0, 20))  # jitter so several workers don't ping in lockstep
+        else:
+            # night: say nothing, let Render wind the service down; wake exactly when the window opens
+            time.sleep(min(interval, _seconds_until_window(local) + 5.0))
 
 
 def _start_keepalive():
@@ -3536,7 +3577,8 @@ def _start_keepalive():
     _KEEPALIVE["started"] = True
     url = base if base.endswith("/healthz") else base + "/healthz"
     threading.Thread(target=_keepalive_loop, args=(url, interval), daemon=True, name="keepalive").start()
-    print(f"[keepalive] pinging {url} every {int(interval)}s so the service never idles out")
+    s, e = _keepalive_hours()
+    print(f"[keepalive] pinging {url} every {int(interval)}s between {s:02d}:00 and {e:02d}:00 Yerevan time; winding down outside those hours")
 
 
 @app.before_request

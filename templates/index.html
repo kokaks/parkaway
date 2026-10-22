@@ -154,7 +154,7 @@
   /* Search: about half the screen, riding above the on-screen keyboard
      (--kb / --vvh are kept current from window.visualViewport by the script) */
   #sidebar.mode-search {
-    bottom: var(--kb, 0px);
+    bottom: max(var(--kb, 0px), var(--banner-h));
     height: min(50dvh, calc(var(--vvh, 100dvh) - var(--safe-top) - 12px));
   }
 
@@ -219,6 +219,98 @@
     cursor: pointer;
     animation: fadeUp .35s var(--ease) both;
   }
+
+  /* ================= Location prompts ================= */
+  :root { --banner-h: 0px; }
+  body.loc-banner { --banner-h: calc(80px + var(--safe-bottom)); }
+  /* the sheet rises above the message so nothing is covered */
+  #sidebar { bottom: max(var(--kb, 0px), var(--banner-h)); }
+  body.loc-banner #sidebar { padding-bottom: 6px; }
+
+  #loc-banner {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 920;
+    height: var(--banner-h);
+    padding: 12px 14px var(--safe-bottom);
+    background: var(--apricot); color: var(--basalt-950);
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 -4px 20px rgba(0,0,0,.35);
+    transform: translateY(110%);
+    transition: transform .45s var(--ease);
+  }
+  body.loc-banner #loc-banner { transform: none; }
+  .loc-banner-ico {
+    width: 40px; height: 40px; border-radius: 14px; flex-shrink: 0;
+    background: var(--basalt-950); color: var(--apricot);
+    display: flex; align-items: center; justify-content: center;
+  }
+  body.loc-banner .loc-banner-ico { animation: ping 2s ease-out infinite; }
+  .loc-banner-text { flex: 1; min-width: 0; line-height: 1.25; }
+  .loc-banner-text b { display: block; font-size: 16px; font-weight: 700; }
+  .loc-banner-text span { display: block; font-size: 12.5px; font-weight: 500; opacity: .82; margin-top: 2px; }
+  #loc-banner-cta {
+    border: none; border-radius: 14px; padding: 12px 16px; flex-shrink: 0;
+    background: var(--basalt-950); color: var(--apricot);
+    font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+
+  /* the arrow button and the address header say "off" until it is fixed */
+  #locate-btn.off { background: var(--apricot); color: var(--basalt-950); animation: ringBtn 2s ease-out infinite; }
+  #loc-chip.off .loc-label { color: var(--apricot); font-weight: 700; }
+  #loc-chip.off .loc-label::before {
+    content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--apricot); margin-right: 6px; vertical-align: 1px;
+    animation: pulseDot 1.6s ease-out infinite;
+  }
+
+  /* first-open screen */
+  #loc-gate {
+    position: fixed; inset: 0; z-index: 935;
+    background: rgba(10,11,14,.78);
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 0 12px calc(12px + var(--safe-bottom));
+    animation: fadeIn .35s both;
+  }
+  .gate-card {
+    width: min(100%, 440px);
+    background: var(--basalt-900); border-radius: 28px;
+    padding: 22px 20px 18px;
+    text-align: center;
+    box-shadow: 0 -8px 40px rgba(0,0,0,.5);
+    animation: riseIn .55s var(--ease) .1s both;
+  }
+  .gate-logo { width: 54px; height: 54px; border-radius: 16px; display: block; margin: 0 auto 12px; }
+  .gate-card h2 { margin: 0; font-size: 24px; line-height: 1.15; font-weight: 700; }
+  .gate-sub { margin: 8px 0 14px; font-size: 14px; color: var(--fog); line-height: 1.45; }
+  .gate-list { list-style: none; margin: 0 0 14px; padding: 0; text-align: left; }
+  .gate-list li { display: flex; align-items: center; gap: 12px; padding: 7px 0; font-size: 14px; line-height: 1.35; color: var(--fog); }
+  .gate-list li b { color: var(--paper); font-weight: 600; }
+  .g-ico { width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0; background-size: 100% 100%; }
+  .gate-tip { font-size: 13px; color: var(--apricot); background: rgba(245,165,54,.1); border-radius: 12px; padding: 9px 12px; margin-bottom: 12px; line-height: 1.4; }
+  .gate-tip b { color: var(--paper); }
+  .gate-cta {
+    width: 100%; border: none; border-radius: 18px; padding: 16px;
+    background: var(--apricot); color: var(--basalt-950);
+    font-size: 17px; font-weight: 700; cursor: pointer;
+  }
+  .gate-cta:disabled { opacity: .7; cursor: default; }
+  .gate-privacy { margin-top: 10px; font-size: 12px; color: var(--fog); }
+
+  /* "show me how" sheet */
+  #loc-steps-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 941; opacity: 0; pointer-events: none; transition: opacity .3s; }
+  #loc-steps-scrim.open { opacity: 1; pointer-events: auto; }
+  #loc-steps {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 951;
+    background: var(--basalt-900); border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
+    padding-bottom: calc(var(--safe-bottom) + 16px);
+    transform: translateY(105%); transition: transform .4s var(--ease);
+    max-height: 85dvh; overflow-y: auto;
+  }
+  #loc-steps.open { transform: none; }
+  .steps-sub { margin: 0 18px 8px; font-size: 13px; color: var(--fog); }
+  #loc-steps-list { margin: 4px 18px 12px; padding-left: 22px; font-size: 15px; line-height: 1.5; color: var(--paper); }
+  #loc-steps-list li { padding: 5px 0 5px 4px; }
+  #loc-steps-list li::marker { color: var(--apricot); font-weight: 700; }
+  @media (min-width: 769px) { #loc-steps { left: 50%; right: auto; width: 440px; margin-left: -220px; } }
 
   /* ================= Home ================= */
   #search-bar-wrap { display: none; position: relative; }
@@ -842,6 +934,9 @@
   .btn-cancel { background: var(--basalt-800); color: var(--fog); }
 
   /* ================= Motion ================= */
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(20,21,26,.45); } 70% { box-shadow: 0 0 0 10px rgba(20,21,26,0); } 100% { box-shadow: 0 0 0 0 rgba(20,21,26,0); } }
+  @keyframes ringBtn { 0% { box-shadow: 0 0 0 0 rgba(245,165,54,.6), 0 4px 16px rgba(0,0,0,.4); } 70% { box-shadow: 0 0 0 14px rgba(245,165,54,0), 0 4px 16px rgba(0,0,0,.4); } 100% { box-shadow: 0 0 0 0 rgba(245,165,54,0), 0 4px 16px rgba(0,0,0,.4); } }
+  @keyframes pulseDot { 0% { box-shadow: 0 0 0 0 rgba(245,165,54,.7); } 70% { box-shadow: 0 0 0 7px rgba(245,165,54,0); } 100% { box-shadow: 0 0 0 0 rgba(245,165,54,0); } }
   @keyframes riseIn   { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
   @keyframes fadeUp   { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   @keyframes fadeIn   { from { opacity: 0; } to { opacity: 1; } }
@@ -872,6 +967,9 @@
   .search-item-ico.kind-street { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5.5' cy='19.5' r='2.2'/%3E%3Ccircle cx='18.5' cy='6.5' r='2.2'/%3E%3Cpath d='M7.7 19.5H14a3.25 3.25 0 0 0 0-6.5H10a3.25 3.25 0 0 1 0-6.5h6.3'/%3E%3C/g%3E%3C/svg%3E"); }
   .search-item-ico.kind-address { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
   #sidebar.mode-search .place::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
+  .g-pin { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z'/%3E%3Ccircle cx='12' cy='10.5' r='2.3'/%3E%3C/g%3E%3C/svg%3E"); }
+  .g-live { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='7.5' y='2.5' width='9' height='19' rx='3.5'/%3E%3Ccircle cx='12' cy='8' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='12' r='1.2' fill='%2334c77b'/%3E%3Ccircle cx='12' cy='16' r='1.2' fill='%2334c77b'/%3E%3C/g%3E%3C/svg%3E"); }
+  .g-auto { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
   .d-autopark::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%2314301f'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%2334c77b' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='4' width='16' height='16' rx='4.5'/%3E%3Cpath d='M10 17V7.5h3a3 3 0 0 1 0 6h-3'/%3E%3C/g%3E%3C/svg%3E"); }
   .nudge-ico.n-location { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%23172a47'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%234d8ff0' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3.5 19.5 20 12 16 4.5 20z'/%3E%3C/g%3E%3C/svg%3E"); }
   .nudge-ico.n-install { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7.2' fill='%233a2d17'/%3E%3Cg transform='translate(5.04 5.04) scale(0.58)' fill='none' stroke='%23f5a536' stroke-width='2.0' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7.500 10.500 12 15l4.500-4.500M5 19.500h14'/%3E%3C/g%3E%3C/svg%3E"); }
@@ -1053,6 +1151,40 @@
         <button class="btn-cancel" onclick="closeAdminLoginModal()">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <!-- LOCATION: the one proper ask on first open (no skip: location is what the app is for) -->
+  <div id="loc-gate" class="hidden" role="dialog" aria-modal="true" aria-labelledby="loc-gate-title">
+    <div class="gate-card">
+      <img class="gate-logo" src="/icon.svg" alt="" />
+      <h2 id="loc-gate-title" class="display">Find parking where you are</h2>
+      <p class="gate-sub">parkaway needs your location to work. Without it we can only guess.</p>
+      <ul class="gate-list">
+        <li><span class="g-ico g-pin"></span><span><b>Spots within a 2-minute walk</b> of where you are right now</span></li>
+        <li><span class="g-ico g-live"></span><span><b>Live traffic and availability</b> for the streets around you</span></li>
+        <li><span class="g-ico g-auto"></span><span><b>Parking saved automatically</b>, no tapping when you park</span></li>
+      </ul>
+      <div class="gate-tip" id="loc-gate-tip"></div>
+      <button type="button" id="loc-gate-cta" class="gate-cta press" onclick="locGateAccept()">Turn on location</button>
+      <div class="gate-privacy">Only used while the app is open. Your route is never saved.</div>
+    </div>
+  </div>
+
+  <!-- LOCATION: stays at the bottom of the screen until location works. Deliberately no dismiss / "Not now". -->
+  <div id="loc-banner" role="status" aria-live="polite" aria-hidden="true">
+    <span class="loc-banner-ico"><span class="ico" style="--icon:var(--i-locate)"></span></span>
+    <div class="loc-banner-text"><b id="loc-banner-title">Turn on location</b><span id="loc-banner-body"></span></div>
+    <button type="button" id="loc-banner-cta" class="press" onclick="locBannerAction()">Turn on</button>
+  </div>
+
+  <!-- LOCATION: step-by-step for turning it back on in Settings (help, so it can be closed) -->
+  <div id="loc-steps-scrim" onclick="closeLocSteps()"></div>
+  <div id="loc-steps" role="dialog" aria-label="Turn on location">
+    <div onclick="closeLocSteps()" style="display:flex; justify-content:center; padding:9px 0 8px; cursor:pointer;"><div class="handle-bar"></div></div>
+    <div class="layers-title">Turn on location</div>
+    <p class="steps-sub">It takes about 20 seconds. We’ll notice the moment it’s on.</p>
+    <ol id="loc-steps-list"></ol>
+    <button type="button" class="gate-cta press" style="margin: 6px 18px 0; width: calc(100% - 36px);" onclick="locStepsDone()">I turned it on</button>
   </div>
 
   <!-- Map legend: the only place the legend lives -->
@@ -1271,34 +1403,6 @@ function initMap() {
 // for / clicking a destination never moves or clears the user's live dot)
 // --------------------------------------------------------------------------
 
-function initGeolocation() {
-  if (!('geolocation' in navigator)) {
-    console.warn('Geolocation is not supported in this browser.');
-    return;
-  }
-  // First request triggers the one-time browser permission prompt.
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      updateUserLocation(pos);
-      attributePosterScan(pos.coords.latitude, pos.coords.longitude);
-      startWatchingLocation();
-    },
-    (err) => {
-      console.warn('Geolocation permission denied or unavailable:', err.message);
-    },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-  );
-}
-
-function startWatchingLocation() {
-  if (geoWatchId !== null) return;
-  geoWatchId = navigator.geolocation.watchPosition(
-    updateUserLocation,
-    (err) => console.warn('Geolocation watch error:', err.message),
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-  );
-}
-
 function updateUserLocation(pos) {
   recordFix(pos); // every GPS fix also feeds automatic parking detection
   updateWhere(pos.coords.latitude, pos.coords.longitude); // "Your location" chip
@@ -1323,7 +1427,6 @@ function updateUserLocation(pos) {
   if (!hasCenteredOnUser) {
     hasCenteredOnUser = true;
     map.setView([userLat, userLon], 16);
-    maybeDemoPin(userLat, userLon);
   }
 }
 
@@ -2241,6 +2344,326 @@ function deleteAdminFeature() {
 }
 
 // --------------------------------------------------------------------------
+// Location. The app is much less useful without it, so this module:
+//   1. asks in a way that works on iPhone (the request is made synchronously inside the tap)
+//   2. never fails silently: every outcome becomes a clear message + the right next step
+//   3. asks ONCE with a proper explanation, then stays out of the way; if location is off it
+//      keeps a message on the bottom of the screen that can't be dismissed (no "Not now")
+//   4. notices on its own when the user fixes it in Settings, and when the app resumes
+//
+// What was wrong before (the "arrow button does nothing" bug):
+//   - the only error handler was console.warn: denied / timed out / unavailable all looked the same
+//   - the first request asked for high-accuracy GPS with maximumAge 0 and a 10 s timeout, which an
+//     iPhone often can't satisfy indoors, so it timed out silently
+//   - the button first waited on the Permissions API (which can hang in an iOS home-screen app) and
+//     only THEN asked for the position, outside the tap, where iOS may refuse to show the prompt
+//   - nothing re-checked after the user changed the setting, and a watch that iOS suspended in the
+//     background was never restarted
+// --------------------------------------------------------------------------
+const LOC_ASKED_KEY = 'parkaway.locAsked';       // the system prompt has been triggered at least once
+const LOC_EVER_KEY  = 'parkaway.locGranted';     // a position has worked on this device before
+const LOC_GOOD_M = 800;                           // accurate enough to trust (demo pin, centring)
+const LOC_IMPRECISE_M = 1500;                     // iOS "Precise Location: off" gives ~5-10 km
+
+let locPerm = 'unknown';        // what the browser says: unknown | prompt | granted | denied
+let locProblem = null;          // null | denied | stuck | timeout | unavailable | imprecise | unsupported
+let locBusy = false;
+let locFixAt = 0;
+let locFirstAccuracy = null;
+let locWatchId = null;
+let locAttributed = false;
+let locRefined = false;
+let gateOpen = false;
+let probeTimer = null;
+let lastBannerKey = '';
+
+const locSupported = () => 'geolocation' in navigator;
+const isIosDevice = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroidDevice = () => /android/i.test(navigator.userAgent);
+
+// ---- permission state (never trusted to answer: it can hang) -------------------
+function queryLocPermission(ms) {
+  return new Promise(resolve => {
+    if (!(navigator.permissions && navigator.permissions.query)) return resolve('unknown');
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve('unknown'); } }, ms || 1500);
+    navigator.permissions.query({ name: 'geolocation' }).then(p => {
+      p.onchange = () => refreshLocationState();       // changed in Settings / the prompt answered
+      if (!done) { done = true; clearTimeout(t); resolve(p.state); }
+    }).catch(() => { if (!done) { done = true; clearTimeout(t); resolve('unknown'); } });
+  });
+}
+
+// ---- the request itself ----------------------------------------------------------------
+// Must be called synchronously from a tap when it may need to show the system prompt.
+function requestLocation(source, attempt) {
+  attempt = attempt || 1;
+  if (!locSupported()) { setLocProblem('unsupported'); renderLocationUI(); return; }
+  if (locBusy && attempt === 1) return;
+  locBusy = true;
+  lsSet(LOC_ASKED_KEY, '1');
+  renderLocationUI();
+  let finished = false;
+  // A prompt nobody answered, or an OS that never calls back: keep waiting, but say what to check.
+  const watchdog = setTimeout(() => { if (!finished) { locBusy = false; setLocProblem('stuck'); renderLocationUI(); } }, 25000);   // release the lock so the next tap tries again
+  // Quick coarse fix first (cell/Wi-Fi, a cached one is fine); the high-accuracy watch refines it.
+  const opts = attempt === 1
+    ? { enableHighAccuracy: false, timeout: 15000, maximumAge: 120000 }
+    : { enableHighAccuracy: true, timeout: 20000, maximumAge: 600000 };
+  gaEvent('loc_requested', { source, attempt });
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      finished = true; clearTimeout(watchdog); locBusy = false;
+      onLocationFix(pos, source);
+      startLocationWatch();
+    },
+    err => {
+      finished = true; clearTimeout(watchdog);
+      if (err.code === 3 && attempt === 1) { requestLocation(source, 2); return; }   // timed out: one more try, GPS this time
+      locBusy = false;
+      onLocationError(err, source);
+    },
+    opts
+  );
+}
+
+function onLocationFix(pos, source) {
+  const first = !locFixAt;
+  const hadProblem = !!locProblem;
+  const acc = pos.coords.accuracy;
+  locFixAt = Date.now();
+  locPerm = 'granted';
+  lsSet(LOC_EVER_KEY, '1');
+  locProblem = acc > LOC_IMPRECISE_M ? 'imprecise' : null;
+  if (locFirstAccuracy === null) locFirstAccuracy = acc;
+
+  updateUserLocation(pos);                                   // marker, first-fix centring, auto-parking + street name hooks
+  if (!locAttributed) { locAttributed = true; attributePosterScan(pos.coords.latitude, pos.coords.longitude); }
+  // an approximate first fix followed by a precise one: centre on the precise one, once
+  if (!locRefined && locFirstAccuracy > LOC_GOOD_M && acc <= 300) { locRefined = true; map.setView([userLat, userLon], 16); }
+
+  if (source === 'tap' || source === 'banner' || source === 'gate' || source === 'retry') {
+    map.flyTo([userLat, userLon], Math.max(map.getZoom(), 16), { duration: 0.7 });
+  }
+  if (first) gaEvent('loc_granted', { source, accuracy_m: Math.round(acc) });
+  if (hadProblem && !locProblem && source !== 'watch') showSnack('Location is on. Showing spots near you.');
+
+  stopProbeLoop();
+  closeLocGate();
+  closeLocSteps();
+  maybeDemoPin(pos.coords.latitude, pos.coords.longitude, acc);
+  renderLocationUI();
+}
+
+function onLocationError(err, source) {
+  gaEvent('loc_error', { code: err.code, source });
+  if (err.code === 1) { locPerm = 'denied'; setLocProblem('denied'); }
+  else if (err.code === 2) setLocProblem('unavailable');
+  else setLocProblem('timeout');
+  closeLocGate();
+  const asked = source === 'tap' || source === 'banner' || source === 'gate' || source === 'retry';
+  if (asked) {
+    if (err.code === 1) showSnack('Location is blocked. Tap “Show me how” to turn it on.', 5000);
+    else if (err.code === 2) showSnack('Can’t get your position. Check that Location Services is on.', 5000);
+    else showSnack('Couldn’t find you yet. Try near a window, or tap again.', 5000);
+  }
+  if (source === 'tap' && err.code === 1) showLocSteps();     // they tried to use it: show exactly what to do
+  startProbeLoop();
+  renderLocationUI();
+}
+
+function setLocProblem(p) { locProblem = p; }
+
+// ---- keeping it alive ------------------------------------------------------------------
+function startLocationWatch() {
+  if (locWatchId !== null || !locSupported()) return;
+  locWatchId = navigator.geolocation.watchPosition(
+    pos => onLocationFix(pos, 'watch'),
+    err => { if (err.code === 1) { stopLocationWatch(); onLocationError(err, 'watch'); } },   // 2 / 3 are transient: keep watching
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
+  );
+}
+function stopLocationWatch() {
+  if (locWatchId !== null) { try { navigator.geolocation.clearWatch(locWatchId); } catch (e) {} locWatchId = null; }
+}
+
+// Settings changed / app resumed: look again without bothering the user.
+async function refreshLocationState() {
+  if (!locSupported()) return;
+  const st = await queryLocPermission();
+  locPerm = st;
+  if (st === 'granted') {
+    if (Date.now() - locFixAt > 30000 && !locBusy) requestLocation('auto');
+  } else if (st === 'denied') {
+    setLocProblem('denied');
+    startProbeLoop();
+  } else if (locProblem === 'denied') {
+    setLocProblem(null);        // it is no longer blocked
+  }
+  renderLocationUI();
+}
+
+// While blocked / failing, quietly try again every few seconds so that turning it on in Settings
+// "just works" the moment they come back. (No prompt can appear in these states.)
+function startProbeLoop() {
+  if (probeTimer) return;
+  probeTimer = setInterval(() => {
+    const failing = ['denied', 'stuck', 'timeout', 'unavailable'].includes(locProblem) || locPerm === 'denied';
+    if (document.hidden || locBusy || !failing || !locSupported()) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => { onLocationFix(pos, 'probe'); startLocationWatch(); },
+      () => {},
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+    );
+  }, 6000);
+}
+function stopProbeLoop() { if (probeTimer) { clearInterval(probeTimer); probeTimer = null; } }
+
+// iOS suspends location updates while the app is in the background and often doesn't resume them.
+function onAppResumed() {
+  if (document.hidden) return;
+  refreshLocationState();
+  if (locFixAt && Date.now() - locFixAt > 45000) {
+    stopLocationWatch();
+    startLocationWatch();
+    navigator.geolocation.getCurrentPosition(pos => onLocationFix(pos, 'resume'), () => {},
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 15000 });
+  }
+}
+
+// ---- the arrow button ------------------------------------------------------------------
+function locateMe() {
+  if (userLat != null && userLon != null) {
+    map.flyTo([userLat, userLon], Math.max(map.getZoom(), 16), { duration: 0.7 });   // instant: go to the last known spot
+    if (Date.now() - locFixAt > 60000) requestLocation('tap');                          // ...and refresh it
+    return;
+  }
+  requestLocation('tap');          // synchronous inside the tap: this is what makes the iOS prompt appear
+}
+function initGeolocation() { requestLocation('legacy'); }
+
+// ---- UI: first-run gate, persistent banner, steps -----------------------------------------
+function platformTip() {
+  if (isIosDevice()) return 'When your iPhone asks, tap <b>Allow</b> (or <b>Allow While Using App</b>).';
+  if (isAndroidDevice()) return 'When asked, tap <b>Allow</b> (or <b>While using the app</b>).';
+  return 'When your browser asks, click <b>Allow</b>.';
+}
+
+function openLocGate() {
+  gateOpen = true;
+  document.getElementById('loc-gate-tip').innerHTML = platformTip();
+  document.getElementById('loc-gate').classList.remove('hidden');
+  gaEvent('loc_gate_shown', {});
+}
+function closeLocGate() {
+  gateOpen = false;
+  document.getElementById('loc-gate').classList.add('hidden');
+}
+function locGateAccept() {
+  const btn = document.getElementById('loc-gate-cta');
+  btn.disabled = true;
+  btn.textContent = 'Waiting for your answer…';
+  requestLocation('gate');                 // synchronous inside the tap
+}
+
+function bannerModel() {
+  if (locFixAt && !locProblem) return null;                  // we know where they are: nothing to say
+  if (gateOpen) return null;
+  if (locBusy) return { key: 'busy', title: 'Finding you…', body: platformTip().replace(/<\/?b>/g, ''), cta: null };
+  if (locProblem === 'unsupported') return { key: 'unsupported', title: 'Location isn’t available', body: 'Open parkaway in Safari or Chrome to find spots near you.', cta: null };
+  if (locProblem === 'denied' || locPerm === 'denied') return { key: 'denied', title: 'Location is blocked', body: 'Turn it on in Settings so we can find spots near you.', cta: 'Show me how' };
+  if (locProblem === 'imprecise') return { key: 'imprecise', title: 'Location is approximate', body: 'Turn on Precise Location to get exact spots.', cta: 'Show me how' };
+  if (locProblem) return { key: 'retry', title: 'Can’t find you yet', body: 'Check that Location Services is on, then try again.', cta: 'Try again' };
+  return { key: 'prompt', title: 'Turn on location', body: 'Find a free spot within a 2-minute walk of you.', cta: 'Turn on' };
+}
+
+function renderLocationUI() {
+  const ok = locFixAt > 0 && !locProblem;
+  const model = bannerModel();
+  document.body.classList.toggle('loc-ok', ok);
+  document.body.classList.toggle('loc-banner', !!model);
+
+  const banner = document.getElementById('loc-banner');
+  const key = model ? model.key : '';
+  if (key !== lastBannerKey) {
+    lastBannerKey = key;
+    if (model) {
+      document.getElementById('loc-banner-title').textContent = model.title;
+      document.getElementById('loc-banner-body').textContent = model.body;
+      const cta = document.getElementById('loc-banner-cta');
+      cta.textContent = model.cta || '';
+      cta.classList.toggle('hidden', !model.cta);
+      gaEvent('loc_banner_shown', { kind: key });
+    }
+  }
+  banner.setAttribute('aria-hidden', model ? 'false' : 'true');
+
+  // top chip + arrow button advertise the problem until it is solved
+  const label = document.getElementById('loc-label-text');
+  document.getElementById('loc-chip').classList.toggle('off', !ok);
+  document.getElementById('locate-btn').classList.toggle('off', !ok);
+  document.getElementById('locate-btn').classList.toggle('busy', locBusy);
+  const want = ok ? 'Your location' : (locProblem === 'imprecise' ? 'Approximate location' : 'Location is off');
+  if (label.textContent !== want && (!ok || label.textContent === 'Location is off' || label.textContent === 'Approximate location')) label.textContent = want;
+
+  const gateBtn = document.getElementById('loc-gate-cta');
+  if (gateOpen && !locBusy) { gateBtn.disabled = false; gateBtn.textContent = 'Turn on location'; }
+}
+
+function locBannerAction() {
+  const m = bannerModel();
+  if (!m || !m.cta) return;
+  if (m.key === 'denied' || m.key === 'imprecise') showLocSteps(m.key);
+  else requestLocation('banner');          // synchronous inside the tap
+}
+
+function showLocSteps(kind) {
+  const ol = document.getElementById('loc-steps-list');
+  const precise = kind === 'imprecise';
+  let steps;
+  if (isIosDevice()) {
+    steps = precise
+      ? ['Open the <b>Settings</b> app', 'Tap <b>Privacy &amp; Security</b> › <b>Location Services</b>', 'Tap <b>Safari Websites</b> (or <b>parkaway</b> if it is listed)', 'Turn <b>Precise Location</b> on']
+      : ['Open the <b>Settings</b> app', 'Tap <b>Privacy &amp; Security</b> › <b>Location Services</b> and make sure it is <b>on</b>', 'Tap <b>Safari Websites</b> (or <b>parkaway</b> if it is listed)', 'Choose <b>While Using the App</b>'];
+  } else if (isAndroidDevice()) {
+    steps = ['Tap the <b>⋮</b> menu › <b>Settings</b> › <b>Site settings</b> › <b>Location</b>', 'Find this site and choose <b>Allow</b>', 'If it is off for the whole phone: <b>Settings › Location</b> and switch it <b>on</b>'];
+  } else {
+    steps = ['Click the <b>lock</b> icon next to the address', 'Open <b>Site settings</b> and set <b>Location</b> to <b>Allow</b>', 'Come back here, we will notice automatically'];
+  }
+  ol.innerHTML = steps.map(s => `<li>${s}</li>`).join('');
+  document.getElementById('loc-steps').classList.add('open');
+  document.getElementById('loc-steps-scrim').classList.add('open');
+  gaEvent('loc_steps_shown', { kind: kind || 'denied' });
+}
+function closeLocSteps() {
+  document.getElementById('loc-steps').classList.remove('open');
+  document.getElementById('loc-steps-scrim').classList.remove('open');
+}
+function locStepsDone() {
+  closeLocSteps();
+  requestLocation('retry');
+}
+
+// ---- boot --------------------------------------------------------------------------------
+async function initLocation() {
+  document.addEventListener('visibilitychange', onAppResumed);
+  window.addEventListener('pageshow', onAppResumed);
+  if (!locSupported() || window.isSecureContext === false) { setLocProblem('unsupported'); renderLocationUI(); return; }
+
+  const st = await queryLocPermission();
+  locPerm = st;
+  const asked = !!lsGet(LOC_ASKED_KEY, '');
+  const ever = !!lsGet(LOC_EVER_KEY, '');
+
+  if (st === 'granted') requestLocation('auto');                       // already allowed: just have it
+  else if (st === 'denied') { setLocProblem('denied'); startProbeLoop(); }
+  else if (ever) requestLocation('auto');                              // it worked before; the OS is re-asking: ask straight away, no pitch
+  else if (!asked) openLocGate();                                      // first ever open: the one proper ask
+  // else: asked before and never decided -> the banner (below) keeps offering it
+  renderLocationUI();
+}
+
+// --------------------------------------------------------------------------
 // UI controller (Yandex Go-style): bottom-sheet modes, shortcut cards,
 // nudges, destination callout
 // --------------------------------------------------------------------------
@@ -2394,25 +2817,6 @@ function updateWhere(lat, lon) {
     .catch(() => {});
 }
 
-function locateMe() {
-  const btn = document.getElementById('locate-btn');
-  if (userLat != null && userLon != null) {
-    map.flyTo([userLat, userLon], Math.max(map.getZoom(), 16), { duration: 0.7 });
-    return;
-  }
-  // No fix yet: ask now (this is the user's own tap, so the prompt makes sense).
-  btn.classList.add('busy');
-  setTimeout(() => btn.classList.remove('busy'), 4000);
-  if (navigator.permissions && navigator.permissions.query) {
-    navigator.permissions.query({ name: 'geolocation' }).then(p => {
-      if (p.state === 'denied') showSnack('Location is blocked. Allow it in your browser settings.');
-      else initGeolocation();
-    }).catch(() => initGeolocation());
-  } else {
-    initGeolocation();
-  }
-}
-
 // ---- Shortcut cards: recents + popular places, with a live parking outlook ----
 const RECENTS_KEY = 'parkaway.recents';
 const OUTLOOK_TEXT = { easy: 'Easy parking', moderate: 'Getting busy', tough: 'Hard to park', unknown: 'See spots' };
@@ -2558,11 +2962,13 @@ function onRecommendationsRendered() {
 // ---- First run: show how the app works with a pin on the user's own location --------
 // The first time someone allows location, drop a pin exactly where they are and show the
 // best parking nearby, so the product demonstrates itself before they have to do anything.
-function maybeDemoPin(lat, lon) {
-  if (lsGet('parkaway.demoDone', '')) return;
+function maybeDemoPin(lat, lon, accuracy) {
+  if (lsGet('parkaway.demoDone', '') || maybeDemoPin._scheduled) return;
   if ((parseInt(lsGet('parkaway.dests', '0'), 10) || 0) > 0) return;     // they already know how it works
   if (currentDest || isAdminMode || sheetMode !== 'home') return;
+  if (accuracy > LOC_GOOD_M) return;                                       // an approximate fix would put the pin in the wrong place: wait for a better one
   if (haversineMeters(lat, lon, CENTER[0], CENTER[1]) > 8000) return;      // not in Yerevan: nothing to show
+  maybeDemoPin._scheduled = true;
   lsSet('parkaway.demoDone', '1');
   setTimeout(() => {
     if (currentDest) return;
@@ -2874,7 +3280,6 @@ let deferredInstallPrompt = null;
 const NUDGE_SNOOZE_MS = 7 * 24 * 3600 * 1000;
 
 const NUDGES = {
-  location: { title: 'Find parking near you', body: 'See spots around you. Your parking gets logged automatically.', cta: 'Turn on', icon: 'n-location' },
   install:  { title: 'Add parkaway to your home screen', body: 'One tap to check parking before you leave.', cta: 'Add', icon: 'n-install' },
   ios:      { title: 'Add to your home screen', body: 'Tap the Share button, then “Add to Home Screen”.', cta: 'Got it', icon: 'n-install' }
 };
@@ -2901,8 +3306,7 @@ function nudgeAccept() {
   const type = nudgeType;
   gaEvent('nudge_accept', { type });
   hideNudge();
-  if (type === 'location') initGeolocation();
-  else if (type === 'install' && deferredInstallPrompt) {
+  if (type === 'install' && deferredInstallPrompt) {
     deferredInstallPrompt.prompt();
     deferredInstallPrompt.userChoice.finally(() => { deferredInstallPrompt = null; });
   } else if (type === 'ios') lsSet('parkaway.snooze.ios', String(Date.now() + 90 * 24 * 3600 * 1000));
@@ -2921,6 +3325,7 @@ const isIosSafari = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !wind
 // Install is only worth asking after the visitor has actually got value (a destination viewed).
 function maybeShowInstallNudge() {
   if (nudgeType || isStandalone()) return;
+  if (!locFixAt || locProblem) return;                 // location comes first; one thing at a time
   if ((parseInt(lsGet('parkaway.dests', '0'), 10) || 0) < 1) return;
   if (deferredInstallPrompt) showNudge('install');
   else if (isIosSafari() && (parseInt(lsGet('parkaway.visits', '0'), 10) || 0) >= 2) showNudge('ios');
@@ -2928,20 +3333,6 @@ function maybeShowInstallNudge() {
 
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstallPrompt = e; });
 window.addEventListener('appinstalled', () => { deferredInstallPrompt = null; if (nudgeType === 'install') hideNudge(); gaEvent('app_installed', {}); });
-
-// Ask for location in context (a friendly card), not with a cold browser prompt on page load.
-function initLocationGate() {
-  if (!('geolocation' in navigator)) return;
-  if (navigator.permissions && navigator.permissions.query) {
-    navigator.permissions.query({ name: 'geolocation' }).then(p => {
-      if (p.state === 'granted') initGeolocation();
-      else if (p.state === 'prompt') showNudge('location');
-      p.onchange = () => { if (p.state === 'granted') { if (nudgeType === 'location') hideNudge(); initGeolocation(); } };
-    }).catch(() => showNudge('location'));
-  } else {
-    showNudge('location');
-  }
-}
 
 // ---- Keep the page from scrolling, and the sheet above the on-screen keyboard ---
 // iOS pans the page when a text field is focused and rubber-bands it when you drag on a
@@ -2981,7 +3372,7 @@ function initSheetUI() {
 
   renderSegmentsToggle();
   lsSet('parkaway.visits', String((parseInt(lsGet('parkaway.visits', '0'), 10) || 0) + 1));
-  initLocationGate();
+  initLocation();
 
   // Come back to the app: refresh what is shown so it never looks stale.
   document.addEventListener('visibilitychange', () => {

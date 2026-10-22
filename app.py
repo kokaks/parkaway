@@ -272,6 +272,26 @@ def require_admin(view_func):
 @app.after_request
 def _set_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
+    if request.path == "/traffic-map":
+        # Yandex's JS API needs 'unsafe-eval' and a few Yandex origins (from Yandex's CSP guide). That is
+        # confined to this one page, which the app embeds as a same-origin iframe.
+        ya = "https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://yastatic.net"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {ya}; "
+            f"style-src 'self' 'unsafe-inline' {ya}; "
+            "connect-src 'self' https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://*.maps.yandex.net; "
+            "img-src 'self' data: https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://*.maps.yandex.net https://yastatic.net; "
+            f"worker-src 'self' data: blob: {ya}; "
+            "font-src 'self' https://yastatic.net; "
+            "object-src 'none'; "
+            "frame-ancestors 'self'"
+        )
+        if os.environ.get("RENDER"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     # Fairly permissive script/style-src (the app relies on inline <script>
@@ -568,7 +588,11 @@ _BUSYNESS_CACHE: dict = {}
 #   TRAFFIC_PROVIDER      auto (default) | here | tomtom | yandex | simulated
 #   HERE_API_KEY          HERE Traffic API v7   (free plan: ~250k requests/month)
 #   TOMTOM_API_KEY        TomTom Traffic Flow   (free plan: 2,500 requests/day)
-#   YANDEX_ROUTING_API_KEY  Yandex Router API   (already used by this app)
+#   YANDEX_ROUTING_API_KEY  Yandex Router API   (already used by this app). NOTE: Yandex lists "no free
+#                         version" for its HTTP Router API, so this only works with a paid key.
+#   COVERAGE (checked against the providers' own tables, Oct 2026): HERE's Traffic API v7 and
+#   TomTom's Traffic API do NOT list Armenia, so for Yerevan they return nothing and the app falls
+#   back to the simulation. They are kept for use in other cities. Use /api/admin/data-sources?probe=1.
 #   HERE_MONTHLY_BUDGET / TOMTOM_DAILY_BUDGET / YANDEX_DAILY_BUDGET   hard caps
 #   TRAFFIC_TTL_S         how long a reading is considered fresh (default 180 HERE, 900 others)
 #   POI_SOURCE            auto (default) | curated    (curated = built-in list only)
@@ -2169,6 +2193,7 @@ def index():
         center_lon=MAP_CENTER[1],
         type_colors=TYPE_COLORS,
         ga4_id=GA4_MEASUREMENT_ID,
+        yandex_traffic=bool(_yandex_maps_key()),
     )
 
 _LOGO_BG_PATH = "M73 0H251C290 0 324 34 324 73V251C324 290 290 324 251 324H73C34 324 0 290 0 251V73C0 34 34 0 73 0Z"
@@ -2521,6 +2546,9 @@ def api_traffic():
     live_n = sum(1 for r in rows if r["source"] == "live")
     est_n = sum(1 for r in rows if r["source"] == "estimated")
     provider = _traffic_view()["provider"]
+    status, _ = _ld_get("traffic:status")
+    # a provider is configured and answering, but has no data for these streets (e.g. no coverage in this city)
+    no_data = bool(provider and status and status.get("last_ok") and not status.get("readings"))
 
     resp = jsonify({
         "generated_at": now.isoformat(),
@@ -2529,7 +2557,8 @@ def api_traffic():
         "overall_traffic_score": max(0, min(10, int(round(overall_avg / 10)))),
         "data_source": {
             "provider": provider,                       # None = simulated
-            "mode": "live" if live_n else ("warming_up" if provider else "simulated"),
+            "mode": "live" if live_n else ("warming_up" if (provider and not no_data) else "simulated"),
+            "provider_returned_no_data": no_data,
             "live_streets": live_n,
             "estimated_streets": est_n,
             "total_streets": len(rows),
@@ -3463,7 +3492,9 @@ def api_admin_data_sources():
                     probe["sample"] = _PROBES[provider](seg)
                 probe["ok"] = bool(probe.get("sample"))
                 if not probe["ok"]:
-                    probe["note"] = "The call worked but returned no usable traffic for this area (no coverage, or road too short)."
+                    probe["note"] = ("The call worked but returned no usable traffic for this area. "
+                                     + ("HERE and TomTom do not list Armenia in their official traffic coverage, so this is expected for Yerevan."
+                                        if provider in ("here", "tomtom") else "No coverage here, or the road was too short."))
             except Exception as exc:
                 probe["ok"] = False
                 probe["error"] = _redact(exc)
@@ -3589,6 +3620,101 @@ def _ensure_keepalive():
 
 
 _start_keepalive()
+
+
+# --------------------------------------------------------------------------
+# Yandex live-traffic map (a viewer, not a data source)
+# --------------------------------------------------------------------------
+# Yandex's FREE Maps API terms say everything received through the API (explicitly "including
+# information about traffic") must be shown on a Yandex map, so its traffic can't be drawn on the
+# Leaflet map and can't be fed into this app's numbers. What the free tier does allow is a Yandex
+# map with Yandex's own live-traffic layer, shown to the user. That is this page: it is embedded in
+# the app (an iframe) when the user flips "Live traffic map" in the menu.
+#
+# It lives on its own URL so that the permissions Yandex's script needs ('unsafe-eval' plus a few
+# Yandex origins) apply to this one page only, and the main app keeps its strict policy.
+#   YANDEX_MAPS_API_KEY   a free "JavaScript API" key from the Yandex Developer Dashboard
+#                         (restrict it to your domain there). Without it the feature is off.
+_YANDEX_KEY_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
+
+
+def _yandex_maps_key() -> str:
+    key = os.environ.get("YANDEX_MAPS_API_KEY", "").strip()
+    return key if _YANDEX_KEY_RE.match(key) else ""
+
+
+_YTRAFFIC_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live traffic</title>
+<style>
+  html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #e9e7e2; }
+  #err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center;
+         padding: 28px; font: 500 15px/1.5 -apple-system, system-ui, sans-serif; color: #eef0f4; background: #1b1d24; }
+</style>
+<script>
+  function post(m) { try { parent.postMessage(Object.assign({ type: 'ytraffic' }, m), location.origin); } catch (e) {} }
+  function fail(why) {
+    var e = document.getElementById('err');
+    if (e) { e.style.display = 'flex'; e.textContent = 'Yandex traffic could not be loaded here.'; }
+    post({ event: 'error', why: why });
+  }
+</script>
+<script src="https://api-maps.yandex.ru/2.1/?apikey=__KEY__&lang=en_US&csp=true" onerror="fail('script')"></script>
+</head><body>
+<div id="map"></div><div id="err"></div>
+<script>
+(function () {
+  if (typeof ymaps === 'undefined') { fail('script'); return; }
+  var q = new URLSearchParams(location.search);
+  function num(k, d) { var v = parseFloat(q.get(k)); return isFinite(v) ? v : d; }
+  ymaps.ready(function () {
+    var map = new ymaps.Map('map', {
+      center: [num('lat', 40.1792), num('lon', 44.5152)],
+      zoom: Math.max(3, Math.min(19, Math.round(num('z', 15)))),
+      controls: []
+    });
+    // zoom buttons on the right, clear of the app's own bar at the top-left
+    map.controls.add(new ymaps.control.ZoomControl({ options: { position: { right: 12, top: 140 } } }));
+
+    // The live traffic layer itself (infoLayerShown adds Yandex's own incident points + speed balloons).
+    var traffic = new ymaps.traffic.provider.Actual({}, { infoLayerShown: true });
+    traffic.setMap(map);
+    function reportLevel() {
+      try { var lv = traffic.state.get('level'); if (typeof lv === 'number') post({ event: 'level', level: lv }); } catch (e) {}
+    }
+    try { traffic.state.events.add('change', reportLevel); } catch (e) {}
+    setTimeout(reportLevel, 2500);
+
+    // context: where you are, where you are going, and the recommended spots
+    var ulat = num('ulat', NaN), ulon = num('ulon', NaN);
+    if (isFinite(ulat) && isFinite(ulon)) map.geoObjects.add(new ymaps.Placemark([ulat, ulon], { hintContent: 'You' }, { preset: 'islands#blueCircleDotIcon' }));
+    var dlat = num('dlat', NaN), dlon = num('dlon', NaN);
+    if (isFinite(dlat) && isFinite(dlon)) map.geoObjects.add(new ymaps.Placemark([dlat, dlon], { hintContent: q.get('dl') || 'Destination' }, { preset: 'islands#redDotIcon' }));
+    (q.get('r') || '').split('|').slice(0, 3).forEach(function (p, i) {
+      var c = p.split(',').map(parseFloat);
+      if (c.length === 2 && isFinite(c[0]) && isFinite(c[1]))
+        map.geoObjects.add(new ymaps.Placemark(c, { iconContent: String(i + 1), hintContent: 'Parking spot ' + (i + 1) }, { preset: 'islands#orangeCircleIcon' }));
+    });
+
+    // tell the app where the user ended up so its own map can follow when this view closes
+    function view() { try { var c = map.getCenter(); post({ event: 'view', center: [c[0], c[1]], zoom: map.getZoom() }); } catch (e) {} }
+    try { map.events.add('actionend', view); } catch (e) {}
+    post({ event: 'ready' });
+  });
+})();
+</script></body></html>"""
+
+
+@app.route("/traffic-map")
+def traffic_map():
+    key = _yandex_maps_key()
+    if not key:
+        return ("Not available", 404)
+    resp = make_response(_YTRAFFIC_PAGE.replace("__KEY__", key))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 if __name__ == "__main__":

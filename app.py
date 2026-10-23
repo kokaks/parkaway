@@ -305,16 +305,21 @@ def _set_security_headers(response):
     if request.path == "/traffic-map":
         # Yandex's JS API needs 'unsafe-eval' and a few Yandex origins (from Yandex's CSP guide). That is
         # confined to this one page, which the app embeds as a same-origin iframe.
-        ya = "https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://yastatic.net"
+        # Rules copied from Yandex's "Enabling the API when using CSP" for JS API 2.1 (the version loaded here):
+        #   script-src also needs *.maps.yandex.net (the 2.1 traffic layer fetches its data from there) and yandex.ru
+        #   style-src needs blob:,  img-src/connect-src need yandex.ru,  frame-src/child-src need api-maps.yandex.ru
+        ya = "https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://suggest-maps.yandex.ru https://*.maps.yandex.net https://yandex.ru https://yastatic.net"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {ya}; "
-            f"style-src 'self' 'unsafe-inline' {ya}; "
-            "connect-src 'self' https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://*.maps.yandex.net; "
-            "img-src 'self' data: https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://*.maps.yandex.net https://yastatic.net; "
-            f"worker-src 'self' data: blob: {ya}; "
+            "style-src 'self' 'unsafe-inline' blob: https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://yastatic.net; "
+            f"connect-src 'self' {ya}; "
+            "img-src 'self' data: blob: https://*.maps.yandex.net https://api-maps.yandex.ru https://*.api-maps.yandex.ru https://yandex.ru https://yastatic.net; "
+            "frame-src https://api-maps.yandex.ru; "
+            "child-src https://api-maps.yandex.ru; "
+            "worker-src 'self' data: blob:; "
             "font-src 'self' https://yastatic.net; "
             "object-src 'none'; "
             "frame-ancestors 'self'"
@@ -3550,6 +3555,7 @@ def api_admin_data_sources():
         "by_type": dict(sorted(by_type.items(), key=lambda kv: -kv[1])[:12]),
         "besttime_configured": bool(os.environ.get("BESTTIME_API_KEY", "").strip()),
     }
+    out["yandex_map_view"] = _yandex_maps_status()
     return jsonify(out)
 
 
@@ -3672,6 +3678,23 @@ _start_keepalive()
 _YANDEX_KEY_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 
 
+def _yandex_maps_status() -> dict:
+    """For the admin diagnostics page: is the key found, and does it look right? Never returns the key itself."""
+    found = {n: bool(os.environ.get(n, "").strip()) for n in ("YANDEX_MAPS_API_KEY", "YANDEX_API_KEY")}
+    raw = (os.environ.get("YANDEX_MAPS_API_KEY") or os.environ.get("YANDEX_API_KEY") or "").strip()
+    return {
+        "variables_present": found,
+        "key_found": bool(raw),
+        "looks_valid": bool(_YANDEX_KEY_RE.match(raw)),
+        "length": len(raw),
+        "hint": (raw[:4] + "…" + raw[-2:]) if len(raw) >= 10 else "",
+        "toggle_enabled": bool(_yandex_maps_key()),
+        "note": ("Not set: add YANDEX_MAPS_API_KEY in Render > Environment and redeploy." if not raw else
+                 "The value has characters a Yandex key never has (quotes, spaces, a pasted label?). Paste only the key itself." if not _YANDEX_KEY_RE.match(raw) else
+                 "Key found. If the traffic view still fails, open it and read the 'Reason' line."),
+    }
+
+
 def _yandex_maps_key() -> str:
     # read only from the environment (Render > Environment); no key is ever written in this file
     key = (os.environ.get("YANDEX_MAPS_API_KEY") or os.environ.get("YANDEX_API_KEY") or "").strip()
@@ -3689,6 +3712,10 @@ _YTRAFFIC_PAGE = r"""<!doctype html>
 </style>
 <script>
   function post(m) { try { parent.postMessage(Object.assign({ type: 'ytraffic' }, m), location.origin); } catch (e) {} }
+  // the browser tells us when our own security policy blocks something Yandex needs: pass that on, it names the culprit
+  document.addEventListener('securitypolicyviolation', function (e) {
+    post({ event: 'csp', directive: e.violatedDirective, blocked: String(e.blockedURI || '').slice(0, 120) });
+  });
   function fail(why) {
     var e = document.getElementById('err');
     if (e) { e.style.display = 'flex'; e.textContent = 'Yandex traffic could not be loaded here.'; }
@@ -3736,7 +3763,7 @@ _YTRAFFIC_PAGE = r"""<!doctype html>
     function view() { try { var c = map.getCenter(); post({ event: 'view', center: [c[0], c[1]], zoom: map.getZoom() }); } catch (e) {} }
     try { map.events.add('actionend', view); } catch (e) {}
     post({ event: 'ready' });
-  });
+  }, function (err) { fail('init: ' + String((err && (err.message || err)) || 'unknown').slice(0, 100)); });
 })();
 </script></body></html>"""
 

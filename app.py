@@ -225,10 +225,28 @@ GA4_MEASUREMENT_ID = os.environ.get("GA4_MEASUREMENT_ID", "")
 # (a single small Render web service), it's a meaningful, cheap improvement.
 _rate_limit_store: dict[str, list[float]] = defaultdict(list)
 
+_rl_calls = 0
+
+
+def _prune_rate_limits(now: float) -> None:
+    """Forget visitors who have been quiet for a while, so the table can't grow without bound
+    (someone sending made-up addresses would otherwise fill the server's memory)."""
+    for k in [k for k, v in _rate_limit_store.items() if not v or v[-1] < now - 900]:
+        _rate_limit_store.pop(k, None)
+    if len(_rate_limit_store) > 20000:                       # still huge: keep only the busiest half
+        keep = sorted(_rate_limit_store.items(), key=lambda kv: len(kv[1]), reverse=True)[:10000]
+        _rate_limit_store.clear()
+        _rate_limit_store.update(keep)
+
+
 def _check_rate_limit(key: str, max_requests: int, window_seconds: float) -> bool:
     """Returns True if the request is allowed, False if the caller has exceeded
     max_requests within window_seconds. Records the request if allowed."""
+    global _rl_calls
     now = time.time()
+    _rl_calls += 1
+    if _rl_calls % 200 == 0 or len(_rate_limit_store) > 5000:
+        _prune_rate_limits(now)
     bucket = _rate_limit_store[key]
     cutoff = now - window_seconds
     while bucket and bucket[0] < cutoff:
@@ -241,9 +259,21 @@ def _check_rate_limit(key: str, max_requests: int, window_seconds: float) -> boo
 
 def _client_ip() -> str:
     # Render sits behind a proxy; the real client IP is in X-Forwarded-For.
+    # The LEFT end of X-Forwarded-For is whatever the visitor chose to send, so it can be forged to dodge limits.
+    # Each trusted proxy appends the address it saw on the RIGHT, so count in from the right.
+    #   TRUSTED_PROXY_HOPS = how many proxies sit in front of this app (see your host's docs/logs).
+    # Unset keeps the old behaviour; the admin login also has an overall cap that does not depend on this.
     fwd = request.headers.get("X-Forwarded-For", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        try:
+            hops = int(os.environ.get("TRUSTED_PROXY_HOPS", "0") or 0)
+        except ValueError:
+            hops = 0
+        if parts and hops > 0 and len(parts) >= hops:
+            return parts[-hops]
+        if parts:
+            return parts[0]
     return request.remote_addr or "unknown"
 
 
@@ -599,7 +629,6 @@ _BUSYNESS_CACHE: dict = {}
 #   OVERPASS_URL          override the OpenStreetMap Overpass endpoint
 #   BESTTIME_API_KEY      optional: live "busier than usual" for landmarks (paid after trial)
 #   BESTTIME_MONTHLY_BUDGET   cap on BestTime calls (default 60)
-_YANDEX_PLACEHOLDER_KEY = "a3c71f9f-d1d6-4319-a690-e1866877ac8e"
 _UA = "parkaway/1.0 (parking recommender)"
 
 
@@ -608,7 +637,7 @@ def _provider_keys() -> dict:
     return {
         "here": os.environ.get("HERE_API_KEY", "").strip(),
         "tomtom": os.environ.get("TOMTOM_API_KEY", "").strip(),
-        "yandex": "" if yandex == _YANDEX_PLACEHOLDER_KEY else yandex,
+        "yandex": yandex,
     }
 
 
@@ -1661,7 +1690,7 @@ def fetch_live_weather() -> dict:
     if now_ts - _WEATHER_CACHE["timestamp"] < 600:
         return _WEATHER_CACHE["data"]
 
-    openweather_key = os.environ.get("944c65db587556cae940016ce322f6d3")
+    openweather_key = os.environ.get("OPENWEATHER_API_KEY")
     weather_info = {
         "temp_c": 22.0,
         "condition": "Clear",
@@ -2780,8 +2809,13 @@ def api_admin_login():
     if not _check_rate_limit(f"login:{_client_ip()}", max_requests=5, window_seconds=300):
         return jsonify({"error": "Too many login attempts. Please wait a few minutes and try again."}), 429
 
+    # Overall cap on password attempts from ALL addresses together, so guessing stays slow even if someone
+    # hides behind many made-up addresses. (The cost: a flood of bad attempts can briefly lock admin login.)
+    if not _check_rate_limit("login:all", max_requests=30, window_seconds=3600):
+        return jsonify({"error": "Too many login attempts. Please wait a while and try again."}), 429
+
     data = request.get_json(silent=True) or {}
-    submitted = str(data.get("password", ""))
+    submitted = str(data.get("password", ""))[:256]
 
     # Constant-time comparison so response timing can't leak how many
     # leading characters of the password guess were correct.
@@ -3633,13 +3667,14 @@ _start_keepalive()
 #
 # It lives on its own URL so that the permissions Yandex's script needs ('unsafe-eval' plus a few
 # Yandex origins) apply to this one page only, and the main app keeps its strict policy.
-#   YANDEX_MAPS_API_KEY   a free "JavaScript API" key from the Yandex Developer Dashboard
+#   YANDEX_MAPS_API_KEY   (or YANDEX_API_KEY)  a free "JavaScript API" key from the Yandex Developer Dashboard
 #                         (restrict it to your domain there). Without it the feature is off.
 _YANDEX_KEY_RE = re.compile(r"^[A-Za-z0-9\-]{8,64}$")
 
 
 def _yandex_maps_key() -> str:
-    key = os.environ.get("YANDEX_MAPS_API_KEY", "").strip()
+    # read only from the environment (Render > Environment); no key is ever written in this file
+    key = (os.environ.get("YANDEX_MAPS_API_KEY") or os.environ.get("YANDEX_API_KEY") or "").strip()
     return key if _YANDEX_KEY_RE.match(key) else ""
 
 

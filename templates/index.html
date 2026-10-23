@@ -1241,6 +1241,7 @@
     <div id="yt-error">
       <b>Yandex traffic isn’t available right now</b>
       <p>It may be blocked on your network, or the Yandex key isn’t valid for this site.</p>
+      <p id="yt-detail" style="font-size:12px; opacity:.75; margin-top:-8px; word-break:break-word;"></p>
       <button type="button" class="steps-cta press" style="margin:0; width:auto; padding:12px 24px;" onclick="closeYandexTraffic()">Back to the map</button>
     </div>
   </div>
@@ -3317,7 +3318,7 @@ function updateDataSourceTag(data) {
   const names = { here: 'HERE', tomtom: 'TomTom', yandex: 'Yandex' };
   if (src.mode === 'live') el.textContent = `live traffic · ${names[src.provider] || src.provider}`;
   else if (src.mode === 'warming_up') el.textContent = 'live traffic connecting…';
-  else el.textContent = 'simulated traffic';
+  else el.textContent = document.getElementById('ytraffic-toggle') ? 'estimated traffic · real-time view: Live traffic map' : 'estimated traffic';
 }
 
 // ---- Traffic badge ------------------------------------------------------------
@@ -3485,6 +3486,7 @@ document.addEventListener('DOMContentLoaded', initSheetUI);
 let ytFrame = null;
 let ytTimer = null;
 let ytLastView = null;
+let ytWhy = [];                 // reasons reported by the traffic page (blocked resources, init errors)
 
 function ytEls() {
   return {
@@ -3514,6 +3516,7 @@ function openYandexTraffic() {
   if (recMarkers.length) p.set('r', recMarkers.map(m => { const ll = m.getLatLng(); return `${ll.lat.toFixed(6)},${ll.lng.toFixed(6)}`; }).join('|'));
 
   ytLastView = null;
+  ytWhy = [];
   error.classList.remove('show');
   status.textContent = 'Loading…';
   ytFrame = document.createElement('iframe');
@@ -3545,6 +3548,9 @@ function ytFail(why) {
   clearTimeout(ytTimer);
   if (!error) return;
   status.textContent = 'Unavailable';
+  const detail = document.getElementById('yt-detail');
+  const reasons = [...new Set(ytWhy)].slice(0, 4);
+  detail.textContent = reasons.length ? 'Reason: ' + reasons.join(' · ') : (why === 'timeout' ? 'Reason: Yandex did not answer in time.' : 'Reason: ' + String(why || 'unknown'));
   error.classList.add('show');
   gaEvent('yandex_traffic_error', { why: String(why || '') });
 }
@@ -3557,7 +3563,11 @@ window.addEventListener('message', (e) => {
   if (m.event === 'ready') { clearTimeout(ytTimer); if (status.textContent === 'Loading…') status.textContent = 'Live'; }
   else if (m.event === 'level' && typeof m.level === 'number') status.textContent = `Traffic ${Math.round(m.level)}/10`;
   else if (m.event === 'view') ytLastView = m;
-  else if (m.event === 'error') ytFail(m.why);
+  else if (m.event === 'csp') {
+    ytWhy.push(`blocked ${m.directive}: ${m.blocked}`);
+    gaEvent('yandex_traffic_csp', { directive: String(m.directive || ''), blocked: String(m.blocked || '').slice(0, 80) });
+  }
+  else if (m.event === 'error') { ytWhy.push(String(m.why || 'error')); ytFail(m.why); }
 });
 
 // Escape closes whatever is open on top (handy on a laptop)

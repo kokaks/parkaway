@@ -79,6 +79,9 @@
     --float-bg: rgba(20, 21, 26, 0.94);
     --sheet-radius: 28px;
     --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --ease-open: cubic-bezier(.22, .9, .3, 1);
+    --ease-close: cubic-bezier(.45, .05, .3, 1);
+    --peek: 92px;                       /* how much of a collapsed sheet stays on screen (handle + one row) */
 
     /* Device Safe Area insets to avoid notches, islands, and rounded corners */
     --safe-top: env(safe-area-inset-top, 0px);
@@ -157,9 +160,10 @@
     z-index: 900;
     padding-bottom: var(--safe-bottom);
     transform: translateY(0);
-    transition: transform 0.35s var(--ease);
+    transition: transform .45s var(--ease-open);
   }
-  #sidebar.mode-dest { max-height: min(62dvh, 560px, calc(100dvh - var(--banner-h) - var(--safe-top) - 230px)); }
+  #sidebar.mode-dest { max-height: calc(100dvh - var(--banner-h) - var(--safe-top) - 150px); }
+  #sidebar.mode-dest #sidebar-scroll { overflow: hidden; flex: 0 1 auto; }
   #sidebar.mode-traffic { max-height: 50dvh; }
   /* Search: about half the screen, riding above the on-screen keyboard
      (--kb / --vvh are kept current from window.visualViewport by the script) */
@@ -169,11 +173,14 @@
   }
 
   /* Collapsed: handle + the Where to? pill peek out (88px must match setupSheetSwipe) */
-  #sidebar.sheet-collapsed { transform: translateY(calc(100% - 88px - var(--safe-bottom))); }
+  #sidebar.sheet-collapsed { transform: translateY(calc(100% - var(--peek) - var(--safe-bottom))); transition: transform .5s var(--ease-close); }
+  #sidebar.dragging { transition: none !important; }
+  /* closing for good: slide all the way down, THEN swap the content (so it never just vanishes) */
+  #sidebar.sliding-out { transform: translateY(112%) !important; transition: transform .42s var(--ease-close) !important; }
 
   #mobile-sheet-handle {
     display: flex; align-items: center; justify-content: center;
-    padding: 9px 0 8px;
+    padding: 15px 0 12px;
     cursor: pointer;
     touch-action: none;
     flex-shrink: 0;
@@ -274,16 +281,16 @@
   }
 
   /* "show me how" sheet */
-  #loc-steps-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 941; opacity: 0; pointer-events: none; transition: opacity .3s; }
-  #loc-steps-scrim.open { opacity: 1; pointer-events: auto; }
+  #loc-steps-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 941; opacity: 0; pointer-events: none; transition: opacity .5s var(--ease-close); }
+  #loc-steps-scrim.open { opacity: 1; pointer-events: auto; transition: opacity .3s; }
   #loc-steps {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 951;
     background: var(--basalt-900); border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
     padding-bottom: calc(var(--safe-bottom) + 16px);
-    transform: translateY(105%); transition: transform .4s var(--ease);
+    transform: translateY(105%); transition: transform .5s var(--ease-close);
     max-height: 85dvh; overflow-y: auto;
   }
-  #loc-steps.open { transform: none; }
+  #loc-steps.open { transform: none; transition: transform .42s var(--ease-open); }
   .steps-cta {
     display: block; width: calc(100% - 36px); margin: 6px 18px 0;
     border: none; border-radius: 16px; padding: 15px;
@@ -368,6 +375,9 @@
   .place[data-level="easy"]     { --lv: var(--leaf); }
   .place[data-level="moderate"] { --lv: var(--apricot); }
   .place[data-level="tough"]    { --lv: var(--alert); }
+  .place-cat { flex: 0 0 88px; flex-direction: column; justify-content: space-between; align-items: flex-start; background: var(--basalt-800); }
+  .place-cat .ico { --ico-size: 30px; color: var(--apricot); }
+  .place-cat .place-name { font-size: 15.5px; }
   .place-text { display: block; min-width: 0; }
   .place-name {
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -602,6 +612,18 @@
   .rec-skel b { flex: 1; height: 38px; }
   .rec-skel u { width: 44px; height: 44px; border-radius: 50%; }
 
+  @media (max-width: 768px) and (max-height: 660px) {
+    body #snack, body #parked-toast { left: calc(76px + var(--safe-left)); max-height: 58px; overflow: hidden; }   /* (body prefix: this block sits before the base rule) */
+    #sidebar.mode-dest #home-btn { display: none; }
+  }
+  /* very short phones (about iPhone SE): trim the extras so all three spots and the button still fit without scrolling */
+  @media (max-height: 600px) {
+    #rec-legend { display: none; }
+    #go-btn { height: 46px; }
+    #go-bar { padding: 4px 16px calc(var(--safe-bottom) + 10px); }
+    #mobile-sheet-handle { padding: 9px 0 8px; }
+  }
+
   /* ================= Traffic ================= */
   .pane-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 6px; }
   .pane-head .dest-title { font-size: 21px; }
@@ -825,9 +847,9 @@
   /* ================= Legend sheet + menu ================= */
   #layers-scrim, #menu-scrim {
     position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 940;
-    opacity: 0; pointer-events: none; transition: opacity .3s;
+    opacity: 0; pointer-events: none; transition: opacity .5s var(--ease-close);
   }
-  #layers-scrim.open, #menu-scrim.open { opacity: 1; pointer-events: auto; }
+  #layers-scrim.open, #menu-scrim.open { opacity: 1; pointer-events: auto; transition: opacity .3s; }
 
   #layers-sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 950;
@@ -837,9 +859,9 @@
     padding-bottom: calc(var(--safe-bottom) + 12px);
     box-shadow: 0 -8px 32px rgba(0,0,0,.5);
     transform: translateY(105%);
-    transition: transform .4s var(--ease);
+    transition: transform .5s var(--ease-close);
   }
-  #layers-sheet.open { transform: translateY(0); }
+  #layers-sheet.open { transform: translateY(0); transition: transform .42s var(--ease-open); }
   .layers-title { padding: 4px 18px 8px; font-size: 21px; font-weight: 700; color: var(--ui-text); }
   .layer-row {
     display: flex; align-items: center; gap: 16px;
@@ -878,7 +900,7 @@
     padding: calc(var(--safe-top) + 24px) 4px calc(var(--safe-bottom) + 16px);
     box-shadow: 8px 0 32px rgba(0,0,0,.5);
     transform: translateX(-105%);
-    transition: transform .4s var(--ease);
+    transition: transform .5s var(--ease-close);
   }
   #menu-drawer.open { transform: translateX(0); }
   .brand { padding: 0 18px 18px; margin-bottom: 8px; border-bottom: 1px solid rgba(58,61,74,.7); }
@@ -1026,10 +1048,10 @@
     padding-top: var(--safe-top);
     background: var(--basalt-950);
     transform: translateY(100%); visibility: hidden;
-    transition: transform .26s var(--ease), visibility 0s .26s;
+    transition: transform .45s var(--ease-close), visibility 0s .45s;
     will-change: transform;
   }
-  #search-page.open { transform: none; visibility: visible; transition: transform .26s var(--ease); }
+  #search-page.open { transform: none; visibility: visible; transition: transform .32s var(--ease-open); }
   #search-page.dragging { transition: none; }
   .sp-grip { display: flex; justify-content: center; padding: 8px 0 0; flex-shrink: 0; }
   .sp-head { display: flex; align-items: center; gap: 6px; padding: 6px 14px 10px; flex-shrink: 0; }
@@ -1074,6 +1096,15 @@
   #rec-legend { text-align: right; font-size: 11px; font-weight: 500; color: var(--fog); opacity: .6; padding: 0 4px 4px; letter-spacing: .01em; }
   #rec-legend:has(+ #rec-list #rec-empty) { display: none; }
   .rec-card { cursor: pointer; }
+  @media (max-height: 740px) {
+    .rec-card { padding: 7px 10px; margin: 2px 0; }
+    .rec-rank { width: 34px; height: 34px; font-size: 15px; }
+    .rec-name { font-size: 15.5px; }
+    .rec-meta { margin-top: 1px; }
+    .gauge { width: 40px; height: 40px; } .gauge-inner { width: 30px; height: 30px; }
+    #go-btn { height: 50px; }
+    #go-bar { padding-top: 6px; }
+  }
   #go-bar { flex-shrink: 0; padding: 10px 16px calc(var(--safe-bottom) + 14px); background: var(--basalt-900); box-shadow: 0 -10px 18px rgba(20,21,26,.55); }
   #sidebar:not(.mode-dest) #go-bar { display: none; }
   #go-btn {
@@ -1103,15 +1134,16 @@
   .route-bubble::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; background: var(--apricot); transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
 
   /* ================= "Navigate with" sheet ================= */
-  #nav-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 941; opacity: 0; pointer-events: none; transition: opacity .3s; }
-  #nav-scrim.open { opacity: 1; pointer-events: auto; }
+  #nav-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 941; opacity: 0; pointer-events: none; transition: opacity .5s var(--ease-close); }
+  #nav-scrim.open { opacity: 1; pointer-events: auto; transition: opacity .3s; }
   #nav-sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 951;
     background: var(--basalt-900); border-radius: var(--sheet-radius) var(--sheet-radius) 0 0;
     padding-bottom: calc(var(--safe-bottom) + 12px);
-    transform: translateY(105%); transition: transform .4s var(--ease); max-height: 85dvh; overflow-y: auto;
+    transform: translateY(105%); transition: transform .5s var(--ease-close); max-height: 85dvh; overflow-y: auto;
   }
-  #nav-sheet.open { transform: none; }
+  #nav-sheet.open { transform: none; transition: transform .42s var(--ease-open); }
+  #layers-sheet.dragging, #nav-sheet.dragging, #loc-steps.dragging, #menu-drawer.dragging { transition: none !important; }
   #nav-apps { padding-bottom: 4px; }
   .nav-app {
     display: flex; align-items: center; gap: 14px; width: 100%; padding: 11px 18px;
@@ -1128,7 +1160,7 @@
   .menu-quiet:hover { opacity: .9; }
 
   /* ================= Which layer is showing ================= */
-  body[data-screen="landing"] #sidebar:not(.mode-traffic) { transform: translateY(115%); visibility: hidden; pointer-events: none; }
+  body[data-screen="landing"] #sidebar:not(.mode-traffic) { transform: translateY(115%); visibility: hidden; pointer-events: none; transition: transform .5s var(--ease-close), visibility 0s linear .5s; }
 
   /* ================= Motion ================= */
   @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(20,21,26,.45); } 70% { box-shadow: 0 0 0 10px rgba(20,21,26,0); } 100% { box-shadow: 0 0 0 0 rgba(20,21,26,0); } }
@@ -1192,6 +1224,9 @@
 
     .sheet-float { left: calc(100% + 12px); right: auto; bottom: 0; width: max-content; justify-content: flex-start; gap: 10px; }
     #sidebar.mode-search .sheet-float { display: flex; }
+    /* when the panel shrinks to its small bar, the buttons beside it must not ride down off the screen with it */
+    .sheet-float { transition: transform .45s var(--ease-open); }
+    #sidebar.sheet-collapsed .sheet-float { transform: translateY(calc(-1 * var(--sb-off, 0px))); transition: transform .5s var(--ease-close); }
     body.admin-on .sheet-float { left: calc(100% + 58px); }     /* make room for the admin toolbar column */
 
     /* the location bar sits under the panel, same width */
@@ -1214,9 +1249,9 @@
     #search-page {
       left: 14px; right: auto; width: 420px; top: 14px; height: calc(100dvh - 28px);
       border-radius: 24px; box-shadow: 0 12px 44px rgba(0,0,0,.55); border: 1px solid var(--basalt-line);
-      transform: translateX(-26px); opacity: 0; transition: transform .22s var(--ease), opacity .22s, visibility 0s .22s;
+      transform: translateX(-26px); opacity: 0; transition: transform .4s var(--ease-close), opacity .4s, visibility 0s .4s;
     }
-    #search-page.open { transform: none; opacity: 1; transition: transform .22s var(--ease), opacity .22s; }
+    #search-page.open { transform: none; opacity: 1; transition: transform .3s var(--ease-open), opacity .3s; }
     .sp-grip { display: none; }
     body.search-open #loc-banner { display: flex; }
     body.loc-banner #search-page { height: calc(100dvh - 28px - var(--banner-h)); }
@@ -1353,11 +1388,11 @@
       <!-- DESTINATION: where, plus the three best spots -->
       <div id="dest-pane">
         <div id="destination-active">
-          <div class="dest-text" onclick="openSearch()">
+          <div class="dest-text" onclick="onDestTextTap()">
             <div class="dest-title" id="dest-coords">—</div>
             <div class="dest-sub" id="dest-sub">Finding the best spots…</div>
           </div>
-          <button type="button" id="clear-destination" class="round-btn" aria-label="Clear destination" title="Clear destination" onclick="clearDestination()">&times;</button>
+          <button type="button" id="clear-destination" class="round-btn" aria-label="Clear destination" title="Clear destination" onclick="closeDestination()">&times;</button>
         </div>
         <div id="rec-legend" aria-hidden="true">Chance of finding parking</div>
         <div id="rec-list">
@@ -2096,82 +2131,6 @@ function collapseMobileSheet() {
 // sheets behave in every native app, so it's discoverable without
 // instructions.
 // --------------------------------------------------------------------------
-(function setupSheetSwipe() {
-  const sidebar = document.getElementById('sidebar');
-  const handle = document.getElementById('mobile-sheet-handle');
-  if (!sidebar || !handle) return;
-
-  let startY = 0;
-  let currentTranslate = 0;
-  let dragging = false;
-  let sheetHeight = 0;
-
-  function collapsedTranslate() {
-    // Matches the CSS: translateY(calc(100% - 88px - safe-bottom))
-    const safeBottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')) || 0;
-    return sheetHeight - 88 - safeBottom;
-  }
-
-  function onPointerDown(e) {
-    // Let the explicit close button handle its own click without also
-    // triggering the parent handle's drag/tap logic (pointer events bubble
-    // up from the button to the handle underneath it).
-    if (e.target.closest('.sheet-close-btn')) return;
-    // Full-screen search mode is closed with its X button, not by dragging.
-    if (sidebar.classList.contains('mode-search')) return;
-    // Only left-click / primary touch, and only from the handle itself so
-    // dragging inside the sheet's own scrollable content isn't hijacked.
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    dragging = true;
-    sheetHeight = sidebar.getBoundingClientRect().height;
-    startY = e.clientY;
-    currentTranslate = sidebar.classList.contains('sheet-collapsed') ? collapsedTranslate() : 0;
-    sidebar.style.transition = 'none';
-    handle.setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e) {
-    if (!dragging) return;
-    const delta = e.clientY - startY;
-    let next = currentTranslate + delta;
-    const maxTranslate = collapsedTranslate();
-    next = Math.max(0, Math.min(maxTranslate, next));
-    sidebar.style.transform = `translateY(${next}px)`;
-  }
-
-  function onPointerUp(e) {
-    if (!dragging) return;
-    dragging = false;
-    sidebar.style.transition = '';
-    sidebar.style.transform = '';
-
-    const delta = e.clientY - startY;
-    const maxTranslate = collapsedTranslate() || 1;
-    const wasCollapsed = sidebar.classList.contains('sheet-collapsed');
-    const draggedFraction = delta / maxTranslate;
-
-    // A small movement is treated as a tap (preserves the original
-    // click-to-toggle behavior); a real drag snaps based on distance moved.
-    if (Math.abs(delta) < 8) {
-      sidebar.classList.toggle('sheet-collapsed');
-      return;
-    }
-
-    if (wasCollapsed) {
-      // Dragging up (negative delta) far enough opens it.
-      if (delta < -40) sidebar.classList.remove('sheet-collapsed');
-    } else {
-      // Dragging down far enough (or more than a third of the way) closes it.
-      if (delta > 40 || draggedFraction > 0.33) sidebar.classList.add('sheet-collapsed');
-    }
-  }
-
-  handle.addEventListener('pointerdown', onPointerDown);
-  handle.addEventListener('pointermove', onPointerMove);
-  handle.addEventListener('pointerup', onPointerUp);
-  handle.addEventListener('pointercancel', onPointerUp);
-})();
-
 // --------------------------------------------------------------------------
 // Admin Curation & ML Feedback Logic
 // --------------------------------------------------------------------------
@@ -3087,6 +3046,7 @@ function openTraffic() {
 
 // Back arrow / close: return to the destination if one is set, else home.
 function closeSearchMode() {
+  if (sheetMode === 'traffic') { slideOutSidebar(() => setSheetMode(currentDest ? 'dest' : 'home')); return; }
   setSheetMode(currentDest ? 'dest' : 'home');
 }
 
@@ -3207,17 +3167,26 @@ function placeButton(p, i) {
   return btn;
 }
 
+// The kinds of place people look for, shown right in the row of shortcuts: two destinations first, then these,
+// then the rest of the destinations (small cards, so the row never feels crowded).
+const PRESET_CATS = [['Food', 'food'], ['Gas', 'fuel'], ['Pharmacy', 'pharmacy'], ['Coffee', 'coffee'], ['Groceries', 'grocery']];
+function categoryButton(label, icon, i) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'place place-cat press';
+  btn.style.setProperty('--i', i);
+  btn.innerHTML = `<span class="ico" style="--icon:var(--i-${icon})"></span><span class="place-name">${label}</span>`;
+  btn.onclick = () => { gaEvent('category_tap', { category: label, from: 'sheet' }); searchFor(label); };
+  return btn;
+}
+
 function renderPresets() {
   const grid = document.getElementById('presets');
   grid.innerHTML = '';
   const places = quickPlaces();
-  let idx = 0, addedRecentLabel = false, addedPopularLabel = false;
-  places.forEach(p => {
-    // Section labels only show in the list layout (CSS hides them on the cards).
-    if (p.recent && !addedRecentLabel) { grid.insertAdjacentHTML('beforeend', '<div class="places-label">Recent</div>'); addedRecentLabel = true; }
-    if (!p.recent && !addedPopularLabel) { grid.insertAdjacentHTML('beforeend', '<div class="places-label">Popular places</div>'); addedPopularLabel = true; }
-    grid.appendChild(placeButton(p, idx++));
-  });
+  const buttons = places.map((p, i) => placeButton(p, i));
+  const cats = PRESET_CATS.map(([label, icon], i) => categoryButton(label, icon, buttons.length + i));
+  [...buttons.slice(0, 2), ...cats, ...buttons.slice(2)].forEach(b => grid.appendChild(b));
   applyOutlook();
   refreshOutlook();
   if (typeof renderLandingList === 'function') { renderLandingList(); if (searchOpen && !$id('search-input').value.trim()) renderSuggest(); }
@@ -3358,6 +3327,7 @@ function showRecSkeleton() {
 // Called from setDestination() once the destination is placed.
 function onDestinationSet(lat, lon, label, method) {
   if (appScreen !== 'map') enterMapMode({ quiet: true });          // picked from the start screen: open the map first
+  expandSheet();                                                    // a new destination always opens the sheet in full
   const input = document.getElementById('search-input');
   if (method !== 'search') { input.value = ''; document.getElementById('search-clear-btn').classList.add('hidden'); }
   if (method === 'search' || method === 'preset') saveRecent(lat, lon, label);
@@ -4324,6 +4294,197 @@ function initNav() {
   }
 }
 document.addEventListener('DOMContentLoaded', initNav);
+
+// --------------------------------------------------------------------------
+// Swipe-down on every menu, and gentle closing
+//
+//  - the bottom sheet (#sidebar): swipe anywhere on it
+//        parking spots:  down -> shrinks to a small bar at the bottom   down again -> closes (back to "Where to?")
+//                        up from the small bar -> opens again
+//        live traffic:   down -> closes (only when its list is scrolled to the top, so scrolling still works)
+//        "Where to?":    down -> peeks, up -> opens
+//  - legend, "Navigate with", "Turn on location": swipe down to close
+//  - the side menu: swipe left to close
+//  Every close now eases away over about half a second, and a swipe carries on from wherever the finger let go.
+// --------------------------------------------------------------------------
+let sbSliding = false;
+
+function safeBottomPx() {
+  if (safeBottomPx._v == null) {
+    const p = document.createElement('div');
+    p.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:0;padding-bottom:env(safe-area-inset-bottom,0px);visibility:hidden';
+    document.body.appendChild(p);
+    safeBottomPx._v = parseFloat(getComputedStyle(p).paddingBottom) || 0;
+    p.remove();
+  }
+  return safeBottomPx._v;
+}
+const peekPx = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--peek')) || 92;
+const collapseOffset = () => Math.max(0, $id('sidebar').offsetHeight - peekPx() - safeBottomPx());
+const isCollapsed = () => $id('sidebar').classList.contains('sheet-collapsed');
+function collapseSheet() {
+  if (sheetMode !== 'dest' && sheetMode !== 'home') return;
+  const sb = $id('sidebar');
+  sb.style.setProperty('--sb-off', collapseOffset() + 'px');     // (laptops: keeps the buttons beside the panel in place)
+  sb.classList.add('sheet-collapsed');
+}
+function expandSheet() { $id('sidebar').classList.remove('sheet-collapsed'); }
+
+// Slide the sheet right off the bottom, and only THEN change what it shows, so a close is never an instant vanish.
+function slideOutSidebar(then) {
+  const sb = $id('sidebar');
+  if (sbSliding) return;
+  sbSliding = true;
+  sb.classList.remove('dragging');
+  sb.style.transform = '';
+  sb.classList.add('sliding-out');
+  setTimeout(() => {
+    try { then(); } finally { sb.classList.remove('sliding-out'); sbSliding = false; }
+  }, 440);
+}
+
+function closeDestination() { slideOutSidebar(() => { expandSheet(); clearDestination(); }); }
+function onDestTextTap() { if (isCollapsed()) expandSheet(); else openSearchPage(); }
+
+function setupSheetGestures() {
+  const sb = $id('sidebar'), scroll = $id('sidebar-scroll'), handle = $id('mobile-sheet-handle');
+  let g = null;
+  sb.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || sbSliding || (appScreen === 'landing' && sheetMode === 'home')) { g = null; return; }
+    const t = e.touches[0];
+    g = { y: t.clientY, x: t.clientX, ly: t.clientY, lt: Date.now(), on: false, v: 0, cur: 0, mode: sheetMode,
+          collapsed: isCollapsed(), h: sb.offsetHeight, off: collapseOffset(),
+          inScroll: !!e.target.closest('#sidebar-scroll'), top: scroll.scrollTop };
+  }, { passive: true });
+  sb.addEventListener('touchmove', (e) => {
+    if (!g || e.touches.length !== 1) return;
+    const t = e.touches[0], dy = t.clientY - g.y, dx = t.clientX - g.x, now = Date.now();
+    if (!g.on) {
+      const vertical = Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx) * 1.3;
+      if (!vertical) { if (Math.abs(dx) > 12) g = null; return; }
+      const listScrolled = g.mode === 'traffic' && g.inScroll && (g.top > 0 || scroll.scrollTop > 0);
+      let ok = false;
+      if (g.mode === 'traffic') ok = dy > 0 && !listScrolled;
+      else if (g.mode === 'dest' || g.mode === 'home') ok = g.collapsed ? true : dy > 0;
+      if (!ok) { g = null; return; }
+      g.on = true;
+      sb.classList.add('dragging');
+    }
+    e.preventDefault();
+    const base = g.collapsed ? g.off : 0;
+    const canClose = g.mode === 'traffic' || (g.mode === 'dest' && g.collapsed);
+    const hi = canClose ? g.h : g.off;
+    let y = base + dy;
+    if (y < 0) y = y * 0.25;                                  // a little give above fully open
+    if (y > hi) y = hi + (y - hi) * 0.2;                      // and a firm stop where this swipe can go no further
+    g.v = (t.clientY - g.ly) / Math.max(1, now - g.lt);
+    g.ly = t.clientY; g.lt = now; g.cur = y;
+    sb.style.transform = `translateY(${y}px)`;
+  }, { passive: false });
+  const end = () => {
+    if (!g) return;
+    const w = g; g = null;
+    if (!w.on) return;
+    sb.classList.remove('dragging');
+    sb.style.transform = '';                                  // the CSS eases from the finger's position to wherever it settles
+    let close = false;
+    if (w.mode === 'traffic') close = w.cur > 90 || w.v > 0.6;
+    else if (w.collapsed) {
+      if (w.cur < w.off * 0.7 || w.v < -0.5) expandSheet();
+      else if (w.mode === 'dest' && (w.cur > w.off + 45 || w.v > 0.5)) close = true;
+    } else if (w.cur > w.off * 0.28 || w.v > 0.5) collapseSheet();
+    if (close) { if (w.mode === 'traffic') closeSearchMode(); else closeDestination(); }
+  };
+  sb.addEventListener('touchend', end);
+  sb.addEventListener('touchcancel', end);
+  // tapping the tab still opens / shrinks it
+  handle.addEventListener('click', () => {
+    if (sheetMode !== 'home' && sheetMode !== 'dest') return;
+    if (isCollapsed()) expandSheet(); else collapseSheet();
+  });
+}
+
+// Bottom sheets that are plain overlays: swipe down to close (only when they are scrolled to the top).
+function bindDismissSheet(el, scrim, close) {
+  let g = null;
+  el.addEventListener('touchstart', (e) => {
+    if (!el.classList.contains('open') || e.touches.length !== 1) { g = null; return; }
+    const t = e.touches[0];
+    g = { y: t.clientY, x: t.clientX, ly: t.clientY, lt: Date.now(), on: false, dy: 0, v: 0, top: el.scrollTop, h: el.offsetHeight };
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (!g || e.touches.length !== 1) return;
+    const t = e.touches[0], dy = t.clientY - g.y, dx = t.clientX - g.x, now = Date.now();
+    if (!g.on) {
+      if (dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.3 && g.top <= 0 && el.scrollTop <= 0) { g.on = true; el.classList.add('dragging'); }
+      else if (Math.abs(dx) > 12 || dy < -10 || el.scrollTop > 0) { g = null; return; }
+      else return;
+    }
+    e.preventDefault();
+    g.dy = Math.max(0, dy);
+    g.v = (t.clientY - g.ly) / Math.max(1, now - g.lt);
+    g.ly = t.clientY; g.lt = now;
+    el.style.transform = `translateY(${g.dy}px)`;
+    if (scrim) { scrim.style.transition = 'none'; scrim.style.opacity = String(Math.max(0, 1 - (g.dy / Math.max(1, g.h)) * 1.3)); }
+  }, { passive: false });
+  const end = () => {
+    if (!g) return;
+    const w = g; g = null;
+    if (!w.on) return;
+    el.classList.remove('dragging');
+    el.style.transform = '';
+    if (scrim) { scrim.style.transition = ''; scrim.style.opacity = ''; }
+    if (w.dy > 100 || w.v > 0.6) close();                      // the CSS carries on from where the finger let go
+  };
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', end);
+}
+
+// The side menu: swipe left to put it away.
+function bindDrawerSwipe() {
+  const el = $id('menu-drawer'), scrim = $id('menu-scrim');
+  let g = null;
+  el.addEventListener('touchstart', (e) => {
+    if (!el.classList.contains('open') || e.touches.length !== 1) { g = null; return; }
+    const t = e.touches[0];
+    g = { x: t.clientX, y: t.clientY, lx: t.clientX, lt: Date.now(), on: false, dx: 0, v: 0, w: el.offsetWidth };
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (!g || e.touches.length !== 1) return;
+    const t = e.touches[0], dx = t.clientX - g.x, dy = t.clientY - g.y, now = Date.now();
+    if (!g.on) {
+      if (dx < -10 && Math.abs(dx) > Math.abs(dy) * 1.3) { g.on = true; el.classList.add('dragging'); }
+      else if (Math.abs(dy) > 12 || dx > 10) { g = null; return; }
+      else return;
+    }
+    e.preventDefault();
+    g.dx = Math.min(0, dx);
+    g.v = (t.clientX - g.lx) / Math.max(1, now - g.lt);
+    g.lx = t.clientX; g.lt = now;
+    el.style.transform = `translateX(${g.dx}px)`;
+    scrim.style.transition = 'none';
+    scrim.style.opacity = String(Math.max(0, 1 + (g.dx / g.w) * 1.3));
+  }, { passive: false });
+  const end = () => {
+    if (!g) return;
+    const w = g; g = null;
+    if (!w.on) return;
+    el.classList.remove('dragging');
+    el.style.transform = '';
+    scrim.style.transition = ''; scrim.style.opacity = '';
+    if (w.dx < -70 || w.v < -0.5) closeMenu();
+  };
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', end);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  setupSheetGestures();
+  bindDismissSheet($id('layers-sheet'), $id('layers-scrim'), closeLayers);
+  bindDismissSheet($id('nav-sheet'), $id('nav-scrim'), closeNavSheet);
+  bindDismissSheet($id('loc-steps'), $id('loc-steps-scrim'), closeLocSteps);
+  bindDrawerSwipe();
+});
 
 // --------------------------------------------------------------------------
 // Yandex live-traffic view (menu toggle, only present when YANDEX_MAPS_API_KEY is set)

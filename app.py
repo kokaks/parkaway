@@ -2221,6 +2221,10 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 @app.route("/")
 def index():
+    try:
+        _places_state()
+    except Exception:
+        pass
     return render_template(
         "index.html",
         center_lat=MAP_CENTER[0],
@@ -2357,146 +2361,6 @@ def service_worker():
 # --------------------------------------------------------------------------
 # Routes: Search & Geocoding Autocomplete API
 # --------------------------------------------------------------------------
-
-@app.route("/api/search")
-def api_search():
-    """
-    Search-as-you-type endpoint for addresses & POIs in Yerevan.
-    Handles typos, fuzzy matching, and exact house numbers (e.g. Mashtots 23/6).
-    Returns [] if no address matches exist.
-    """
-    query = request.args.get("q", "").strip()
-    if not query or len(query) < 2:
-        return jsonify([])
-
-    # Optional caller position (the front-end sends its live GPS fix when it has
-    # one). Used only to attach a "distance from you" to each result, like the
-    # result rows in Yandex Maps. Falls back to the map centre when missing or
-    # when the caller is nowhere near Yerevan.
-    try:
-        origin_lat = float(request.args.get("lat", MAP_CENTER[0]))
-        origin_lon = float(request.args.get("lon", MAP_CENTER[1]))
-        if not (MAP_BOUNDS["lat_min"] <= origin_lat <= MAP_BOUNDS["lat_max"] and
-                MAP_BOUNDS["lon_min"] <= origin_lon <= MAP_BOUNDS["lon_max"]):
-            raise ValueError("origin outside Yerevan area")
-    except (TypeError, ValueError):
-        origin_lat, origin_lon = MAP_CENTER
-
-    # Apply synonym/transliteration normalization for common street names
-    normalized_q = query.lower()
-    for syn, target in YEREVAN_STREET_SYNONYMS.items():
-        if syn in normalized_q:
-            normalized_q = normalized_q.replace(syn, target.lower())
-
-    results = []
-    seen_keys = set()
-
-    # 1. Local POIs & Ground-Truth Segments Fuzzy Match
-    for poi in FALLBACK_POIS:
-        p_name = poi["name"]
-        if normalized_q in p_name.lower() or query.lower() in p_name.lower():
-            key = p_name.lower()
-            if key not in seen_keys:
-                seen_keys.add(key)
-                results.append({
-                    "title": p_name,
-                    "subtitle": f"Landmark ({poi['type'].replace('_', ' ').title()}) • Kentron, Yerevan",
-                    "kind": "landmark",
-                    "lat": poi["lat"],
-                    "lon": poi["lon"],
-                })
-
-    for f in PARKING_FEATURES:
-        f_name = f.get("name", "")
-        if f_name and f_name != "Unnamed Segment":
-            if normalized_q in f_name.lower() or query.lower() in f_name.lower():
-                key = f_name.lower()
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    lat, lon = _extract_lat_lon(f)
-                    results.append({
-                        "title": f_name,
-                        "subtitle": "Street / Parking Segment • Yerevan",
-                        "kind": "street",
-                        "lat": lat,
-                        "lon": lon,
-                    })
-
-    # 2. Photon API for fast search-as-you-type and typo tolerance
-    try:
-        search_term = urllib.parse.quote(normalized_q)
-        photon_url = f"https://photon.komoot.io/api/?q={search_term}&lat=40.1792&lon=44.5152&zoom=14&limit=8&bbox=44.40,40.10,44.60,40.25"
-        req = urllib.request.Request(photon_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            data = json.loads(resp.read().decode())
-            for feat in data.get("features", []):
-                props = feat.get("properties", {})
-                coords = feat.get("geometry", {}).get("coordinates", [])
-                if len(coords) == 2:
-                    lon, lat = coords[0], coords[1]
-                    housenumber = props.get("housenumber", "")
-                    street = props.get("street") or props.get("name") or ""
-                    city = props.get("city") or props.get("town") or "Yerevan"
-
-                    if street:
-                        title = f"{street} {housenumber}".strip() if housenumber else street
-                    else:
-                        title = props.get("name", "")
-
-                    if not title:
-                        continue
-
-                    sub_parts = [p for p in [props.get("district"), city, "Armenia"] if p]
-                    subtitle = ", ".join(sub_parts)
-
-                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
-                    if key not in seen_keys and title.lower() not in seen_keys:
-                        seen_keys.add(key)
-                        seen_keys.add(title.lower())
-                        results.append({
-                            "title": title,
-                            "subtitle": subtitle,
-                            "kind": "address",
-                            "lat": lat,
-                            "lon": lon,
-                        })
-    except Exception as exc:
-        print(f"[search] Photon API call skipped/failed ({exc})")
-
-    # 3. OpenStreetMap Nominatim for exact address/building numbers (e.g., "Mashtots 23/6")
-    if len(results) < 4 or "/" in query or any(char.isdigit() for char in query):
-        try:
-            nom_q = urllib.parse.quote(f"{normalized_q}, Yerevan, Armenia")
-            nom_url = f"https://nominatim.openstreetmap.org/search?q={nom_q}&format=json&limit=5&bounded=0&viewbox=44.40,40.22,44.60,40.12"
-            req = urllib.request.Request(nom_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                data = json.loads(resp.read().decode())
-                for item in data:
-                    lat = float(item["lat"])
-                    lon = float(item["lon"])
-                    display_name = item.get("display_name", "")
-                    parts = [p.strip() for p in display_name.split(",")]
-                    title = ", ".join(parts[:2]) if len(parts) >= 2 else parts[0]
-                    subtitle = ", ".join(parts[2:4]) if len(parts) >= 4 else "Yerevan, Armenia"
-
-                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
-                    if key not in seen_keys and title.lower() not in seen_keys:
-                        seen_keys.add(key)
-                        seen_keys.add(title.lower())
-                        results.append({
-                            "title": title,
-                            "subtitle": subtitle,
-                            "kind": "address",
-                            "lat": lat,
-                            "lon": lon,
-                        })
-        except Exception as exc:
-            print(f"[search] Nominatim API call skipped/failed ({exc})")
-
-    results = results[:8]
-    for r in results:
-        r["distance_m"] = int(round(haversine_m(origin_lat, origin_lon, r["lat"], r["lon"])))
-    return jsonify(results)
 
 # --------------------------------------------------------------------------
 # Routes: System APIs
@@ -3555,6 +3419,20 @@ def api_admin_data_sources():
         "by_type": dict(sorted(by_type.items(), key=lambda kv: -kv[1])[:12]),
         "besttime_configured": bool(os.environ.get("BESTTIME_API_KEY", "").strip()),
     }
+    if request.args.get("refresh_pois") == "1":
+        _run_in_background(_refresh_places)
+    pl = _places_state()
+    by_cat: dict = {}
+    for p in pl["items"]:
+        by_cat[p["c"]] = by_cat.get(p["c"], 0) + 1
+    out["places_directory"] = {
+        "count": len(pl["items"]), "by_category": by_cat,
+        "named": sum(1 for p in pl["items"] if p.get("n")),
+        "with_opening_hours": sum(1 for p in pl["items"] if p.get("oh")),
+        "with_address": sum(1 for p in pl["items"] if p.get("ad")),
+        "age_h": round((time.time() - pl["fetched_at"]) / 3600, 1) if pl["fetched_at"] else None,
+        "route_server": os.environ.get("OSRM_URL", "https://router.project-osrm.org"),
+    }
     out["yandex_map_view"] = _yandex_maps_status()
     return jsonify(out)
 
@@ -3777,6 +3655,464 @@ def traffic_map():
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+# --------------------------------------------------------------------------
+# Places directory + category search + route preview
+# --------------------------------------------------------------------------
+# What the search bar can now do (like Google/Yandex Maps):
+#   "food"                  -> the nearest restaurants / fast food, by name, with address and open/closed
+#   "pharmacy", "gas", ...  -> same for pharmacies, gas stations, cafes, groceries, ATMs
+#   "cvs pharmacies"        -> brand + category: matches by name when it exists nearby, otherwise says so and
+#                              shows the nearest pharmacies instead
+#   anything else           -> landmarks, streets, addresses, and any place whose NAME matches (Photon/Nominatim)
+# The data is OpenStreetMap's (community-maintained), downloaded weekly from Overpass and shared by all workers
+# through the live_data table, exactly like the POI inventory. Names/hours are only as complete as OSM is.
+#
+#   /api/route  - the on-map preview line (OpenStreetMap roads via OSRM). It is NOT used for navigation: the real
+#                 turn-by-turn route and live-traffic ETA come from the user's own maps app (Yandex/Google/...).
+#   OSRM_URL    - routing server (default: the public demo server: non-commercial, max 1 request/second, no uptime
+#                 promise). Point it at your own OSRM or a paid provider with the same API to scale.
+
+PLACE_CATS = {
+    "food":     {"title": "Food",      "plural": "restaurants",
+                 "words": ["food", "restaurant", "restaurants", "eat", "eating", "dinner", "lunch", "fast food", "burger",
+                           "pizza", "kebab", "khorovats", "ресторан", "рестораны", "еда", "поесть", "ճաշարան", "ռեստորան", "սնունդ"]},
+    "coffee":   {"title": "Coffee",    "plural": "cafés",
+                 "words": ["coffee", "cafe", "café", "cafes", "coffee shop", "кофе", "кофейня", "кафе", "սուրճ", "սրճարան", "կաֆե"]},
+    "fuel":     {"title": "Gas",       "plural": "gas stations",
+                 "words": ["gas", "gas station", "petrol", "fuel", "gasoline", "filling station", "заправка", "азс", "бензин", "լցակայան", "բենզին"]},
+    "pharmacy": {"title": "Pharmacy",  "plural": "pharmacies",
+                 "words": ["pharmacy", "pharmacies", "drugstore", "chemist", "аптека", "аптеки", "դեղատուն"]},
+    "grocery":  {"title": "Groceries", "plural": "grocery stores",
+                 "words": ["grocery", "groceries", "supermarket", "supermarkets", "продукты", "супермаркет", "սուպերմարկետ"]},
+    "atm":      {"title": "ATM",       "plural": "ATMs",
+                 "words": ["atm", "atms", "cash", "bank", "banks", "банкомат", "банк", "բանկոմատ", "բանկ"]},
+}
+_PLACE_STOPWORDS = {"near", "nearby", "me", "my", "in", "the", "a", "an", "closest", "nearest", "open", "best", "cheap",
+                    "good", "around", "here", "to", "find", "for", "of", "at", "рядом", "около"}
+_PLACE_SUBTYPE = {
+    ("amenity", "restaurant"): ("food", "Restaurant"), ("amenity", "fast_food"): ("food", "Fast food"),
+    ("amenity", "food_court"): ("food", "Food court"), ("shop", "bakery"): ("food", "Bakery"),
+    ("amenity", "cafe"): ("coffee", "Café"), ("amenity", "ice_cream"): ("coffee", "Ice cream"), ("shop", "coffee"): ("coffee", "Coffee shop"),
+    ("amenity", "fuel"): ("fuel", "Gas station"),
+    ("amenity", "pharmacy"): ("pharmacy", "Pharmacy"), ("shop", "chemist"): ("pharmacy", "Drugstore"),
+    ("shop", "supermarket"): ("grocery", "Supermarket"), ("shop", "convenience"): ("grocery", "Convenience store"),
+    ("shop", "greengrocer"): ("grocery", "Fruit & veg"), ("shop", "butcher"): ("grocery", "Butcher"),
+    ("amenity", "atm"): ("atm", "ATM"), ("amenity", "bank"): ("atm", "Bank"),
+}
+_PLACE_UNNAMED_OK = {"fuel", "pharmacy", "atm"}
+_PLACE_ICON_KIND = {"food": "food", "coffee": "coffee", "fuel": "fuel", "pharmacy": "pharmacy", "grocery": "grocery", "atm": "atm"}
+
+
+def _norm_text(s: str) -> str:
+    """Case/accent-insensitive form used for matching names and queries."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or "").casefold())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", s).strip()
+
+
+_PLACE_WORD_INDEX = None
+
+
+def _place_word_index():
+    global _PLACE_WORD_INDEX
+    if _PLACE_WORD_INDEX is None:
+        idx = {}
+        for key, c in PLACE_CATS.items():
+            for w in c["words"]:
+                idx[_norm_text(w)] = key
+        _PLACE_WORD_INDEX = idx
+    return _PLACE_WORD_INDEX
+
+
+def parse_place_query(q: str):
+    """'cvs pharmacies' -> ('pharmacy', ['cvs']);  'food' -> ('food', []);  'Tumanyan 12' -> (None, [...])."""
+    import difflib
+    idx = _place_word_index()
+    text = _norm_text(q)
+    cat = None
+    # multi-word phrases first ("gas station", "fast food")
+    for phrase in sorted((w for w in idx if " " in w), key=len, reverse=True):
+        if phrase in f" {text} ":
+            cat = idx[phrase]
+            text = text.replace(phrase, " ")
+            break
+    tokens = [t for t in re.findall(r"[^\W_]+(?:['’-][^\W_]+)*", text, re.UNICODE) if t not in _PLACE_STOPWORDS]
+    if cat is None:
+        singles = [w for w in idx if " " not in w]
+        for i, t in enumerate(tokens):
+            hit = idx.get(t) or (idx.get(t[:-1]) if t.endswith("s") else None)
+            if not hit and len(t) >= 5:                      # "pharmcy", "restarant"
+                near = difflib.get_close_matches(t, singles, n=1, cutoff=0.82)
+                hit = idx.get(near[0]) if near else None
+            if hit:
+                cat = hit
+                tokens.pop(i)
+                break
+    return cat, tokens
+
+
+# ---- the directory ------------------------------------------------------------------------------------------
+def _places_overpass_query() -> str:
+    bb = f"{MAP_BOUNDS['lat_min']:.5f},{MAP_BOUNDS['lon_min']:.5f},{MAP_BOUNDS['lat_max']:.5f},{MAP_BOUNDS['lon_max']:.5f}"
+    return ('[out:json][timeout:80];('
+            f'nwr["amenity"~"^(restaurant|fast_food|food_court|cafe|ice_cream|fuel|pharmacy|atm|bank)$"]({bb});'
+            f'nwr["shop"~"^(bakery|coffee|chemist|supermarket|convenience|greengrocer|butcher)$"]({bb});'
+            ');out center tags qt;')
+
+
+def _places_from_overpass(elements):
+    items = []
+    for el in elements:
+        tags = el.get("tags") or {}
+        sub = next(((k, tags[k]) for k in ("amenity", "shop") if (k, tags.get(k)) in _PLACE_SUBTYPE), None)
+        if not sub:
+            continue
+        cat, label = _PLACE_SUBTYPE[sub]
+        lat = el.get("lat", (el.get("center") or {}).get("lat"))
+        lon = el.get("lon", (el.get("center") or {}).get("lon"))
+        if lat is None or lon is None:
+            continue
+        name = tags.get("name:en") or tags.get("name") or tags.get("brand") or tags.get("operator") or ""
+        if not name and cat not in _PLACE_UNNAMED_OK:
+            continue
+        alts = {_norm_text(tags[k]) for k in ("name", "name:en", "name:ru", "name:hy", "int_name", "brand", "brand:en", "operator") if tags.get(k)}
+        cuisine = (tags.get("cuisine") or "").split(";")[0].replace("_", " ").strip().title()
+        items.append({
+            "c": cat, "s": label, "n": name[:80], "a": sorted(alts)[:6],
+            "ad": " ".join(x for x in (tags.get("addr:street"), tags.get("addr:housenumber")) if x)[:70],
+            "cu": cuisine[:24] if cat == "food" else "",
+            "lat": round(lat, 5), "lon": round(lon, 5),
+            "oh": parse_opening_hours(tags.get("opening_hours")),
+        })
+    return items[:20000]
+
+
+def _refresh_places():
+    """Downloads the directory from OpenStreetMap (Overpass) once, for every worker."""
+    urls = [u for u in (os.environ.get("OVERPASS_URL", "").strip(),
+                        "https://overpass-api.de/api/interpreter",
+                        "https://overpass.kumi.systems/api/interpreter") if u]
+    body = urllib.parse.urlencode({"data": _places_overpass_query()}).encode()
+    last = None
+    for url in urls:
+        try:
+            data = _http_json(url, timeout=90, method="POST", data=body,
+                              headers={"Content-Type": "application/x-www-form-urlencoded"})
+            items = _places_from_overpass(data.get("elements", []))
+            if len(items) < 20:
+                raise RuntimeError(f"only {len(items)} places returned")
+            _ld_put("places:directory", {"fetched_at": time.time(), "items": items})
+            print(f"[places] stored {len(items)} OpenStreetMap places")
+            return len(items)
+        except Exception as exc:
+            last = exc
+            print(f"[places] Overpass fetch failed on {url.split('/')[2]} ({_redact(exc)})")
+    raise RuntimeError(f"all Overpass endpoints failed: {_redact(last)}")
+
+
+_PLACES_MEM = {"checked": 0.0, "fetched_at": None, "items": []}
+_PLACES_TTL_S = 7 * 24 * 3600
+
+
+def _places_state():
+    now = time.time()
+    st = _PLACES_MEM
+    if st["items"] and now - st["checked"] < 600:
+        return st
+    st["checked"] = now
+    if os.environ.get("POI_SOURCE", "auto").strip().lower() == "curated":
+        return st                                          # offline/dev mode: never call out
+    try:
+        doc, _ = _ld_get("places:directory")
+        if doc and doc.get("items"):
+            if st["fetched_at"] != doc.get("fetched_at"):
+                st.update(items=doc["items"], fetched_at=doc.get("fetched_at"))
+            if now - float(doc.get("fetched_at", 0)) > _PLACES_TTL_S and _ld_claim("places:refresh", 3600):
+                _run_in_background(_refresh_places)
+        elif _ld_claim("places:refresh", 3600):
+            _run_in_background(_refresh_places)
+    except Exception as exc:
+        print(f"[places] directory read failed ({_redact(exc)})")
+    return st
+
+
+def _place_open_now(p, now):
+    return oh_is_open(p.get("oh"), now.weekday(), now.hour * 60 + now.minute) if p.get("oh") else None
+
+
+def _place_result(p, olat, olon, now, q_tokens=()):
+    cat = p["c"]
+    title = p["n"] or p["s"]
+    bits = [p["s"] if p["n"] else "", p.get("cu") or "", p.get("ad") or ""]
+    subtitle = " · ".join(b for b in bits if b) or PLACE_CATS[cat]["title"]
+    return {
+        "title": title, "subtitle": subtitle, "kind": _PLACE_ICON_KIND[cat], "category": cat,
+        "lat": p["lat"], "lon": p["lon"], "open_now": _place_open_now(p, now),
+        "distance_m": int(round(haversine_m(olat, olon, p["lat"], p["lon"]))),
+    }
+
+
+def _place_matches(items, cat, tokens):
+    out = []
+    for p in items:
+        if cat and p["c"] != cat:
+            continue
+        if tokens:
+            hay = " ".join(p.get("a") or []) + " " + _norm_text(p["n"])
+            if not all(t in hay for t in (_norm_text(x) for x in tokens)):
+                continue
+        out.append(p)
+    return out
+
+
+def search_places(cat, tokens, olat, olon, limit=8):
+    """-> (results, note). Nearest first; if a brand/name was asked for and nothing matches, the nearest of the
+    category are returned with a note saying so."""
+    st = _places_state()
+    items = st["items"]
+    if not items:
+        return [], "Loading nearby places… try again in a moment."
+    now = _yerevan_now()
+    note = ""
+    found = _place_matches(items, cat, tokens)
+    if not found and cat and tokens:
+        found = _place_matches(items, cat, [])
+        note = f"No “{' '.join(tokens)}” nearby. Showing {PLACE_CATS[cat]['plural']} instead."
+    found.sort(key=lambda p: haversine_m(olat, olon, p["lat"], p["lon"]))
+    near = [p for p in found if haversine_m(olat, olon, p["lat"], p["lon"]) <= 3000]
+    chosen = (near if len(near) >= 3 else found)[:limit]
+    return [_place_result(p, olat, olon, now) for p in chosen], note
+
+
+_SEARCH_CACHE = {}
+
+
+def _search_cache_get(key):
+    hit = _SEARCH_CACHE.get(key)
+    if hit and time.time() - hit[0] < 45:
+        return hit[1]
+    return None
+
+
+def _search_cache_put(key, value):
+    if len(_SEARCH_CACHE) > 400:
+        _SEARCH_CACHE.clear()
+    _SEARCH_CACHE[key] = (time.time(), value)
+
+
+@app.route("/api/search")
+def api_search():
+    """
+    Search-as-you-type for the whole app.
+      category ("food", "pharmacy", "gas"...)  -> nearest places of that kind, by name, with address and open/closed
+      brand + category ("cvs pharmacies")      -> that brand if it exists nearby, else the category with a note
+      anything else                            -> places whose name matches, landmarks, streets, addresses
+    Returns {"results": [...], "note": str, "category": str|None}. Each result has title, subtitle, kind, lat, lon,
+    distance_m and (for places with known hours) open_now.
+    """
+    query = request.args.get("q", "").strip()[:80]
+    if len(query) < 2:
+        return jsonify({"results": [], "note": "", "category": None})
+
+    try:
+        origin_lat = float(request.args.get("lat", MAP_CENTER[0]))
+        origin_lon = float(request.args.get("lon", MAP_CENTER[1]))
+        if not (MAP_BOUNDS["lat_min"] <= origin_lat <= MAP_BOUNDS["lat_max"] and
+                MAP_BOUNDS["lon_min"] <= origin_lon <= MAP_BOUNDS["lon_max"]):
+            raise ValueError("origin outside Yerevan area")
+    except (TypeError, ValueError):
+        origin_lat, origin_lon = MAP_CENTER
+
+    ckey = (_norm_text(query), round(origin_lat, 3), round(origin_lon, 3))
+    cached = _search_cache_get(ckey)
+    if cached is not None:
+        return jsonify(cached)
+
+    cat, tokens = parse_place_query(query)
+    results, note, seen_keys = [], "", set()
+
+    # 1. category / brand search in the directory: fast, no network
+    if cat:
+        found, note = search_places(cat, tokens, origin_lat, origin_lon)
+        if found:
+            env = {"results": found, "note": note, "category": cat}
+            _search_cache_put(ckey, env)
+            return jsonify(env)
+        results_from_dir = []
+    else:
+        # a name typed on its own ("carrefour", "dalma garden") may be a place in the directory
+        results_from_dir = []
+        if len(query) >= 3:
+            items = _places_state()["items"]
+            now = _yerevan_now()
+            toks = [t for t in _norm_text(query).split(" ") if t and t not in _PLACE_STOPWORDS]
+            if toks:
+                hits = _place_matches(items, None, toks)
+                hits.sort(key=lambda p: haversine_m(origin_lat, origin_lon, p["lat"], p["lon"]))
+                results_from_dir = [_place_result(p, origin_lat, origin_lon, now) for p in hits[:4]]
+                for r in results_from_dir:
+                    seen_keys.add(f"{r['title'].lower()}:{round(r['lat'], 4)}:{round(r['lon'], 4)}")
+    results.extend(results_from_dir)
+
+    # 2. landmarks, street segments, Photon and Nominatim (addresses, other named places)
+    normalized_q = query.lower()
+    for syn, target in YEREVAN_STREET_SYNONYMS.items():
+        if syn in normalized_q:
+            normalized_q = normalized_q.replace(syn, target.lower())
+
+    for poi in FALLBACK_POIS:
+        p_name = poi["name"]
+        if normalized_q in p_name.lower() or query.lower() in p_name.lower():
+            key = p_name.lower()
+            if key not in seen_keys:
+                seen_keys.add(key)
+                results.append({"title": p_name, "subtitle": f"Landmark ({poi['type'].replace('_', ' ').title()}) • Kentron, Yerevan",
+                                "kind": "landmark", "lat": poi["lat"], "lon": poi["lon"]})
+
+    for f in PARKING_FEATURES:
+        f_name = f.get("name", "")
+        if f_name and f_name != "Unnamed Segment":
+            if normalized_q in f_name.lower() or query.lower() in f_name.lower():
+                key = f_name.lower()
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    lat, lon = _extract_lat_lon(f)
+                    results.append({"title": f_name, "subtitle": "Street / Parking Segment • Yerevan",
+                                    "kind": "street", "lat": lat, "lon": lon})
+
+    try:
+        search_term = urllib.parse.quote(normalized_q)
+        photon_url = (f"https://photon.komoot.io/api/?q={search_term}&lat={origin_lat:.4f}&lon={origin_lon:.4f}"
+                      f"&zoom=14&limit=8&bbox=44.40,40.10,44.60,40.25")
+        req = urllib.request.Request(photon_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            data = json.loads(resp.read().decode())
+            for feat in data.get("features", []):
+                props = feat.get("properties", {})
+                coords = feat.get("geometry", {}).get("coordinates", [])
+                if len(coords) == 2:
+                    lon, lat = coords[0], coords[1]
+                    housenumber = props.get("housenumber", "")
+                    street = props.get("street") or props.get("name") or ""
+                    city = props.get("city") or props.get("town") or "Yerevan"
+                    title = (f"{street} {housenumber}".strip() if housenumber else street) if street else props.get("name", "")
+                    if not title:
+                        continue
+                    subtitle = ", ".join(p for p in [props.get("district"), city, "Armenia"] if p)
+                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
+                    if key not in seen_keys and title.lower() not in seen_keys:
+                        seen_keys.add(key)
+                        seen_keys.add(title.lower())
+                        results.append({"title": title, "subtitle": subtitle, "kind": "address", "lat": lat, "lon": lon})
+    except Exception as exc:
+        print(f"[search] Photon API call skipped/failed ({exc})")
+
+    if len(results) < 4 or "/" in query or any(char.isdigit() for char in query):
+        try:
+            nom_q = urllib.parse.quote(f"{normalized_q}, Yerevan, Armenia")
+            nom_url = f"https://nominatim.openstreetmap.org/search?q={nom_q}&format=json&limit=5&bounded=0&viewbox=44.40,40.22,44.60,40.12"
+            req = urllib.request.Request(nom_url, headers={"User-Agent": "YerevanParkingApp/1.0"})
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                for item in json.loads(resp.read().decode()):
+                    lat, lon = float(item["lat"]), float(item["lon"])
+                    parts = [p.strip() for p in item.get("display_name", "").split(",")]
+                    title = ", ".join(parts[:2]) if len(parts) >= 2 else parts[0]
+                    subtitle = ", ".join(parts[2:4]) if len(parts) >= 4 else "Yerevan, Armenia"
+                    key = f"{title.lower()}:{round(lat, 4)}:{round(lon, 4)}"
+                    if key not in seen_keys and title.lower() not in seen_keys:
+                        seen_keys.add(key)
+                        seen_keys.add(title.lower())
+                        results.append({"title": title, "subtitle": subtitle, "kind": "address", "lat": lat, "lon": lon})
+        except Exception as exc:
+            print(f"[search] Nominatim API call skipped/failed ({exc})")
+
+    results = results[:8]
+    for r in results:
+        r.setdefault("distance_m", int(round(haversine_m(origin_lat, origin_lon, r["lat"], r["lon"]))))
+    env = {"results": results, "note": note, "category": cat}
+    if results:
+        _search_cache_put(ckey, env)
+    return jsonify(env)
+
+
+# ---- route preview --------------------------------------------------------------------------------------------
+_ROUTE_CACHE = {}
+_ROUTE_LOCK = threading.Lock()
+_ROUTE_LAST = [0.0]
+
+
+def _decimate(coords, limit=450):
+    if len(coords) <= limit:
+        return coords
+    step = (len(coords) - 1) / (limit - 1)
+    out = [coords[int(round(i * step))] for i in range(limit - 1)]
+    out.append(coords[-1])
+    return out
+
+
+def _straight_route(flat, flon, tlat, tlon):
+    d = haversine_m(flat, flon, tlat, tlon)
+    return {"coords": [[flat, flon], [tlat, tlon]], "distance_m": int(d * 1.3), "duration_s": int(d * 1.3 / (25000 / 3600)),
+            "source": "straight"}
+
+
+@app.route("/api/route")
+def api_route():
+    """
+    Preview line from the user to a parking spot (drawn on the map; never used to navigate).
+    ?from=lat,lon&to=lat,lon -> {coords:[[lat,lon],...], distance_m, duration_s, source: osrm|straight}
+    Falls back to a straight line (source=straight) whenever the routing server is down or slow, so the app always
+    has something to draw. Duration is free-flow driving time: it does NOT include live traffic.
+    """
+    try:
+        flat, flon = (float(x) for x in request.args.get("from", "").split(","))
+        tlat, tlon = (float(x) for x in request.args.get("to", "").split(","))
+    except (TypeError, ValueError):
+        return jsonify({"error": "from and to must be lat,lon"}), 400
+    if not all(-90 <= v <= 90 for v in (flat, tlat)) or not all(-180 <= v <= 180 for v in (flon, tlon)):
+        return jsonify({"error": "coordinates out of range"}), 400
+    if haversine_m(flat, flon, tlat, tlon) > 150000:
+        return jsonify({"error": "too far apart for a preview"}), 400
+    if not _check_rate_limit(f"route:{_client_ip()}", max_requests=40, window_seconds=60):
+        return jsonify({"error": "Too many requests"}), 429
+
+    key = (round(flat, 4), round(flon, 4), round(tlat, 4), round(tlon, 4))
+    hit = _ROUTE_CACHE.get(key)
+    if hit and time.time() - hit[0] < 90:
+        return jsonify(hit[1])
+
+    base = os.environ.get("OSRM_URL", "https://router.project-osrm.org").strip().rstrip("/")
+    url = (f"{base}/route/v1/driving/{flon:.6f},{flat:.6f};{tlon:.6f},{tlat:.6f}"
+           f"?overview=full&geometries=geojson&steps=false&alternatives=false")
+    out = None
+    try:
+        with _ROUTE_LOCK:                                   # the public server asks for at most 1 request/second
+            wait = 1.05 - (time.time() - _ROUTE_LAST[0])
+            if wait > 0:
+                time.sleep(min(wait, 1.2))
+            _ROUTE_LAST[0] = time.time()
+        headers = {"User-Agent": "parkaway/1.0 (parking recommender; route preview)"}
+        ref = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+        if ref:
+            headers["Referer"] = ref
+        data = _http_json(url, timeout=4.5, headers=headers)
+        route = (data.get("routes") or [None])[0]
+        if data.get("code") == "Ok" and route and route.get("geometry", {}).get("coordinates"):
+            coords = [[round(c[1], 5), round(c[0], 5)] for c in route["geometry"]["coordinates"]]
+            out = {"coords": _decimate(coords), "distance_m": int(route["distance"]), "duration_s": int(route["duration"]),
+                   "source": "osrm"}
+    except Exception as exc:
+        print(f"[route] routing server skipped/failed ({_redact(exc)})")
+    if out is None:
+        out = _straight_route(flat, flon, tlat, tlon)
+    else:
+        if len(_ROUTE_CACHE) > 500:
+            _ROUTE_CACHE.clear()
+        _ROUTE_CACHE[key] = (time.time(), out)
+    return jsonify(out)
 
 
 if __name__ == "__main__":

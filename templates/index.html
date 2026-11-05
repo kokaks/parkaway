@@ -4161,7 +4161,8 @@ function clearRoute(keepSeq) {
 
 function routePadding() {
   if (window.innerWidth > 768) return { tl: [$id('sidebar').offsetWidth + 50, 90], br: [60, 70] };
-  return { tl: [34, 118], br: [34, $id('sidebar').offsetHeight + 40] };
+  const covered = Math.max(0, window.innerHeight - $id('sidebar').getBoundingClientRect().top);       // what the sheet covers right now (small when minimized)
+  return { tl: [34, 118], br: [34, covered + 40] };
 }
 
 function fitRoute(animate) {
@@ -4478,7 +4479,22 @@ function bindDrawerSwipe() {
   el.addEventListener('touchcancel', end);
 }
 
+// Start moving the map while the parking spots are showing -> the sheet shrinks to its small bar (same smooth motion)
+// so the map is free to explore. Only a real drag / pinch / scroll counts; the app's own map moves (flying to a place,
+// re-centring on the route) never trigger it. Swipe up on the bar (or tap it) to bring the spots back.
+function bindMapAutoMinimize() {
+  const minimize = () => {
+    if (appScreen !== 'map' || sheetMode !== 'dest' || isCollapsed() || sbSliding) return;
+    collapseSheet();
+  };
+  map.on('dragstart', minimize);                                   // finger or mouse drag (Leaflet only fires this for the user)
+  const c = map.getContainer();
+  c.addEventListener('wheel', minimize, { passive: true });        // mouse wheel / trackpad zoom
+  c.addEventListener('touchstart', (e) => { if (e.touches.length > 1) minimize(); }, { passive: true });   // pinch
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  bindMapAutoMinimize();
   setupSheetGestures();
   bindDismissSheet($id('layers-sheet'), $id('layers-scrim'), closeLayers);
   bindDismissSheet($id('nav-sheet'), $id('nav-scrim'), closeNavSheet);

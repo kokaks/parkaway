@@ -3680,8 +3680,6 @@ PLACE_CATS = {
                            "pizza", "kebab", "khorovats", "ресторан", "рестораны", "еда", "поесть", "ճաշարան", "ռեստորան", "սնունդ"]},
     "coffee":   {"title": "Coffee",    "plural": "cafés",
                  "words": ["coffee", "cafe", "café", "cafes", "coffee shop", "кофе", "кофейня", "кафе", "սուրճ", "սրճարան", "կաֆե"]},
-    "fuel":     {"title": "Gas",       "plural": "gas stations",
-                 "words": ["gas", "gas station", "petrol", "fuel", "gasoline", "filling station", "заправка", "азс", "бензин", "լցակայան", "բենզին"]},
     "pharmacy": {"title": "Pharmacy",  "plural": "pharmacies",
                  "words": ["pharmacy", "pharmacies", "drugstore", "chemist", "аптека", "аптеки", "դեղատուն"]},
     "grocery":  {"title": "Groceries", "plural": "grocery stores",
@@ -3695,7 +3693,6 @@ _PLACE_SUBTYPE = {
     ("amenity", "restaurant"): ("food", "Restaurant"), ("amenity", "fast_food"): ("food", "Fast food"),
     ("amenity", "food_court"): ("food", "Food court"), ("shop", "bakery"): ("food", "Bakery"),
     ("amenity", "cafe"): ("coffee", "Café"), ("amenity", "ice_cream"): ("coffee", "Ice cream"), ("shop", "coffee"): ("coffee", "Coffee shop"),
-    ("amenity", "fuel"): ("fuel", "Gas station"),
     ("amenity", "pharmacy"): ("pharmacy", "Pharmacy"), ("shop", "chemist"): ("pharmacy", "Drugstore"),
     ("shop", "supermarket"): ("grocery", "Supermarket"), ("shop", "convenience"): ("grocery", "Convenience store"),
     ("shop", "greengrocer"): ("grocery", "Fruit & veg"), ("shop", "butcher"): ("grocery", "Butcher"),
@@ -3758,7 +3755,7 @@ def parse_place_query(q: str):
 def _places_overpass_query() -> str:
     bb = f"{MAP_BOUNDS['lat_min']:.5f},{MAP_BOUNDS['lon_min']:.5f},{MAP_BOUNDS['lat_max']:.5f},{MAP_BOUNDS['lon_max']:.5f}"
     return ('[out:json][timeout:80];('
-            f'nwr["amenity"~"^(restaurant|fast_food|food_court|cafe|ice_cream|fuel|pharmacy|atm|bank)$"]({bb});'
+            f'nwr["amenity"~"^(restaurant|fast_food|food_court|cafe|ice_cream|pharmacy|atm|bank)$"]({bb});'
             f'nwr["shop"~"^(bakery|coffee|chemist|supermarket|convenience|greengrocer|butcher)$"]({bb});'
             ');out center tags qt;')
 
@@ -3858,6 +3855,8 @@ def _place_result(p, olat, olon, now, q_tokens=()):
 def _place_matches(items, cat, tokens):
     out = []
     for p in items:
+        if p.get("c") == "fuel":                       # gas stations are not destinations for parking (older downloads may still hold some)
+            continue
         if cat and p["c"] != cat:
             continue
         if tokens:

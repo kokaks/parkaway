@@ -1106,6 +1106,23 @@
     #go-bar { padding-top: 6px; }
   }
   #go-bar { flex-shrink: 0; padding: 10px 16px calc(var(--safe-bottom) + 14px); background: var(--basalt-900); box-shadow: 0 -10px 18px rgba(20,21,26,.55); }
+  /* the parking sheet sits lower and wastes less room under the button (the safe area used to be added twice) */
+  #sidebar.mode-dest { padding-bottom: 0; --peek: 80px; }
+  #sidebar.mode-dest #go-bar { padding: 8px 16px max(12px, calc(var(--safe-bottom) - 12px)); }
+  body.loc-banner #sidebar.mode-dest #go-bar { padding-bottom: 8px; }
+  #sidebar.mode-dest #sidebar-scroll { padding-bottom: 4px; }
+  #sidebar.mode-dest #mobile-sheet-handle { padding: 12px 0 8px; }
+  @media (max-height: 740px) { #sidebar.mode-dest #go-bar { padding-top: 6px; } }
+  /* very narrow phones (about 320px wide): keep each card's info line on ONE line so three cards stay three short cards */
+  @media (max-width: 350px) {
+    #sidebar.mode-dest .rec-card { gap: 9px; padding-left: 8px; padding-right: 8px; }
+    #sidebar.mode-dest .rec-rank { width: 30px; height: 30px; font-size: 14px; }
+    #sidebar.mode-dest .rec-name { font-size: 15px; }
+    #sidebar.mode-dest .rec-meta { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; gap: 5px; }
+    #sidebar.mode-dest .gauge { width: 36px; height: 36px; }
+    #sidebar.mode-dest .gauge-inner { width: 27px; height: 27px; font-size: 11px; }
+  }
+  @media (max-height: 600px) { #sidebar.mode-dest #mobile-sheet-handle { padding: 8px 0 6px; } }
   #sidebar:not(.mode-dest) #go-bar { display: none; }
   #go-btn {
     display: block; width: 100%; height: 56px; border: none; border-radius: 18px; cursor: pointer;
@@ -1123,6 +1140,13 @@
   /* ================= Route preview ================= */
   .route-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
   .route-bubble-wrap { width: 0; height: 0; }
+  /* where the time bubble goes when "above its pin" would cover the destination's name bubble */
+  .route-bubble.below { bottom: auto; top: 12px; }
+  .route-bubble.below::after { bottom: auto; top: -5px; }
+  .route-bubble.right { left: 22px; bottom: 6px; transform: none; }
+  .route-bubble.right::after { left: -3px; bottom: 14px; transform: rotate(45deg); }
+  .route-bubble.left { left: auto; right: 22px; bottom: 6px; transform: none; }
+  .route-bubble.left::after { left: auto; right: -3px; bottom: 14px; transform: rotate(45deg); }
   .route-bubble {
     position: absolute; left: 0; bottom: 38px; transform: translateX(-50%);
     background: var(--apricot); color: var(--basalt-950); border-radius: 14px; padding: 6px 11px 7px;
@@ -1742,6 +1766,15 @@ function initMap() {
 
   map.on('click', (e) => {
     if (isAdminMode) return;
+    // While the spots for a SEARCHED place are showing, a stray tap while scrolling the map must not replace them.
+    // (A dropped pin can still be nudged by tapping again; closing the spots with the x or a swipe unlocks everything.)
+    if (currentDest && currentDest.method !== 'map_click' && currentDest.method !== 'demo') {
+      if (!currentDest.hinted) {
+        currentDest.hinted = true;
+        showSnack('Pin dropping is paused while your parking spots are showing. Close them (×) to drop a new pin.', 4200);
+      }
+      return;
+    }
     setDestination(e.latlng.lat, e.latlng.lng, 'Dropped pin', 'map_click');
   });
 }
@@ -1991,7 +2024,7 @@ function loadParkingData(retryCount) {
 }
 
 function setDestination(lat, lon, label, method) {
-  currentDest = { lat, lon, label };
+  currentDest = { lat, lon, label, method: method || 'unknown' };
 
   if (destMarker) map.removeLayer(destMarker);
 
@@ -2864,7 +2897,7 @@ function bannerModel() {
     return { key: 'busy', title: 'Finding you…', body: platformTip(), cta: null };
   }
   if (locProblem === 'unsupported') return { key: 'unsupported', title: 'Location isn’t available', body: 'Open parkaway in Safari or Chrome.', cta: null };
-  if (locProblem === 'denied') return { key: 'denied', title: 'Turn on location', body: 'to see parking spots near you', cta: 'How' };
+  if (locProblem === 'denied') return { key: 'denied', title: 'Turn on location', body: 'to see parking spots near you', cta: 'Turn on' };
   if (locProblem === 'imprecise') return { key: 'imprecise', title: 'Location is approximate', body: 'Turn on Precise Location', cta: 'How' };
   if (locProblem) return { key: 'retry', title: 'Can’t find you yet', body: 'Check that Location Services is on', cta: 'Try again' };
   return { key: 'prompt', title: 'Turn on location', body: 'to see parking spots near you', cta: 'Turn on' };
@@ -2903,7 +2936,9 @@ function renderLocationUI() {
 function locBannerAction() {
   const m = bannerModel();
   if (!m || !m.cta) return;
-  if (m.key === 'denied' || m.key === 'imprecise') showLocSteps(m.key);
+  // "Turn on" asks the phone for permission again. If the phone is willing it shows its own "Allow location?" prompt; if
+  // it has been blocked for good (websites can't override that) the request fails at once and the steps sheet opens.
+  if (m.key === 'imprecise') showLocSteps(m.key);
   else requestLocation('banner');          // synchronous inside the tap, so iOS shows the prompt
 }
 
@@ -3169,7 +3204,7 @@ function placeButton(p, i) {
 
 // The kinds of place people look for, shown right in the row of shortcuts: two destinations first, then these,
 // then the rest of the destinations (small cards, so the row never feels crowded).
-const PRESET_CATS = [['Food', 'food'], ['Gas', 'fuel'], ['Pharmacy', 'pharmacy'], ['Coffee', 'coffee'], ['Groceries', 'grocery']];
+const PRESET_CATS = [['Food', 'food'], ['Pharmacy', 'pharmacy'], ['Coffee', 'coffee'], ['Groceries', 'grocery']];
 function categoryButton(label, icon, i) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -3749,7 +3784,7 @@ let appScreen = 'landing';
 let searchOpen = false;
 
 const CATEGORIES = [
-  { label: 'Food', icon: 'food' }, { label: 'Coffee', icon: 'coffee' }, { label: 'Gas', icon: 'fuel' },
+  { label: 'Food', icon: 'food' }, { label: 'Coffee', icon: 'coffee' },
   { label: 'Pharmacy', icon: 'pharmacy' }, { label: 'Groceries', icon: 'grocery' }
 ];
 const LEVEL_WORD = { easy: 'Easy', moderate: 'Busy', tough: 'Hard' };
@@ -4147,7 +4182,37 @@ function showRoute(data, lat, lon) {
     interactive: false, zIndexOffset: 1200, keyboard: false
   }).addTo(map);
   if (data.source === 'osrm' && !Route.attr) { map.attributionControl.addAttribution('Route: OSRM'); Route.attr = true; }
+  placeRouteBubble();
+  setTimeout(placeRouteBubble, 450);                    // again once the bubble's pop-in and the map's glide have finished
   fitRoute(true);
+}
+
+// The time bubble sits above its pin by default. The destination's name bubble sits above ITS pin, and a parking spot is
+// usually right beside the destination, so they can land on top of each other. Try above, below, right, then left, and use
+// the first position that leaves both fully visible. Re-checked after every zoom or move (the gap in pixels changes).
+function placeRouteBubble() {
+  if (!Route.bubble) return;
+  const wrap = Route.bubble.getElement && Route.bubble.getElement();
+  const b = wrap && wrap.querySelector('.route-bubble');
+  if (!b) return;
+  const others = [...document.querySelectorAll('.dest-callout, .dc-stem, .dc-dot')].map(e => e.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+  const sb = $id('sidebar').getBoundingClientRect();
+  const sheetTop = sb.top > 0 && sb.height > 0 ? sb.top : window.innerHeight;       // the bubble must also stay above the sheet
+  const pad = 8;
+  const hitsDest = (r) => others.some(o => r.left < o.right + pad && r.right > o.left - pad && r.top < o.bottom + pad && r.bottom > o.top - pad);
+  const onScreen = (r) => r.left >= 6 && r.right <= window.innerWidth - 6 && r.top >= 62 && r.bottom <= sheetTop - 4;
+  let fallback = null;
+  for (const pos of ['', 'below', 'right', 'left']) {
+    b.classList.remove('below', 'right', 'left');
+    if (pos) b.classList.add(pos);
+    const r = b.getBoundingClientRect();
+    if (!hitsDest(r)) {
+      if (onScreen(r)) return;                       // clear of the destination bubble AND fully visible: perfect
+      if (!fallback) fallback = pos;                 // clear of it, but partly hidden: keep as a second choice
+    }
+  }
+  b.classList.remove('below', 'right', 'left');
+  if (fallback) b.classList.add(fallback);           // never cover the destination bubble, even if it means a bit of edge
 }
 
 function clearRoute(keepSeq) {
@@ -4176,6 +4241,7 @@ function fitRoute(animate) {
 function bindRouteFollow() {
   const later = () => { clearTimeout(Route.timer); Route.timer = setTimeout(() => fitRoute(true), 1000); };
   map.on('zoomend', () => { Route.lastZoomAt = Date.now(); });
+  map.on('zoomend moveend', () => { if (Route.bubble) { clearTimeout(placeRouteBubble._t); placeRouteBubble._t = setTimeout(placeRouteBubble, 60); } });
   map.on('dragstart', () => clearTimeout(Route.timer));
   // a real drag (finger or mouse) always counts, even right after a zoom
   map.on('dragend', () => { if (Route.active && Date.now() >= Route.progUntil) later(); });
@@ -4320,7 +4386,7 @@ function safeBottomPx() {
   }
   return safeBottomPx._v;
 }
-const peekPx = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--peek')) || 92;
+const peekPx = () => parseFloat(getComputedStyle($id('sidebar')).getPropertyValue('--peek')) || 92;
 const collapseOffset = () => Math.max(0, $id('sidebar').offsetHeight - peekPx() - safeBottomPx());
 const isCollapsed = () => $id('sidebar').classList.contains('sheet-collapsed');
 function collapseSheet() {
